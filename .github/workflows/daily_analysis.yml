@@ -1,71 +1,71 @@
-name: 每日股票分析
+名称：每日股票分析
 
-on:
+在:
   # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
-  schedule:
-    - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
+  日程安排:
+     
   
   # 手动触发
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: '运行模式'
-        required: true
-        default: 'full'
-        type: choice
-        options:
-          - full          # 完整分析（股票+大盘）
-          - market-only   # 仅大盘复盘
-          - stocks-only   # 仅股票分析
+  工作流触发:
+    输入:
+      模式:
+        描述: '运行模式'
+        必填： 真
+        默认：'full'
+        类型： 选择
+        选项:
+          - 完整          # 完整分析（股票+大盘）
+          - 市场-only   # 仅大盘复盘
+          - 仅股票   # 仅股票分析
 
 # 并发控制：同一时间只运行一个分析任务
-concurrency:
-  group: stock-analysis
-  cancel-in-progress: false
+并发:
+  组: 股票分析
+  取消进行中： false
 
-jobs:
-  analyze:
-    runs-on: ubuntu-latest
+工作:
+  分析:
+    运行于：ubuntu-latest
     # 添加超时限制，防止任务卡死
-    timeout-minutes: 30
+    超时分钟数：30
     
-    steps:
-      - name: 随机延迟（避免固定时间访问）
-        run: sleep $((RANDOM % 60))  # 随机延迟0-60秒启动
+    步骤:
+      - 名称: 随机延迟（避免固定时间访问）
+        运行： 睡眠 $((RANDOM % 60))  # 随机延迟0-60秒启动
       
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - 名称: 检出代码
+        使用：actions/checkout@v5
       
       - name: 设置 Python 环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
+        使用：actions/setup-python@v6
+        与：
+          python-version：'3.11'
+          缓存：'pip'
       
-      - name: 安装依赖
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+      - 名称: 安装依赖
+        运行： |
+          使用pip升级pip：pip install --upgrade pip
+          使用pip安装 requirements.txt 中的依赖项：pip install -r requirements.txt
       
-      - name: 创建必要目录
-        run: |
+      - 名称: 创建必要目录
+        运行： |
           mkdir -p data logs reports
       
-      - name: 执行股票分析
-        env:
+      - 名称: 执行股票分析
+        环境:
           # ==========================================
           # AI 配置
           # ==========================================
-          # Gemini AI（主选）
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
-          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
-          GEMINI_REQUEST_DELAY: '3.0'
+          # Gemini AI（首选）
+          GEMINI_API_KEY：${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL：${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
+          GEMINI_MODEL_FALLBACK：${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
+          GEMINI_REQUEST_DELAY：'3.0'
           
           # OpenAI 兼容 API（备选）
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || secrets.OPENAI_MODEL }}
+          OPENAI_API_KEY：${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL：${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL：${{ vars.OPENAI_MODEL || secrets.OPENAI_MODEL }}
           
           # ==========================================
           # 数据源
