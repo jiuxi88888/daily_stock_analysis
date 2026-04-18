@@ -56,6 +56,9 @@ on:
           # ==========================================
           # AI 配置
           # ==========================================
+          ALIYUN_BAILIAN_API_KEY: ${{ secrets.ALIYUN_BAILIAN_API_KEY }}
+          ALIYUN_BAILIAN_BASE_URL: ${{ vars.ALIYUN_BAILIAN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1' }}
+          ALIYUN_BAILIAN_MODEL: ${{ vars.ALIYUN_BAILIAN_MODEL || 'qwen-max' }}  # 或者 qwen-plus, qwen-turbo
           # Gemini AI（首选）
           GEMINI_API_KEY：${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL：${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
