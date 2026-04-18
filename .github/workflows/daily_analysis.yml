@@ -1,58 +1,58 @@
-名称：每日股票分析
+name: 每日股票分析
 
 on:
   # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
-  日程安排:
-     
+  schedule:
+    - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
   
   # 手动触发
-  工作流触发:
-    输入:
-      模式:
-        描述: '运行模式'
-        必填： 真
-        默认：'full'
-        类型： 选择
-        选项:
-          - 完整          # 完整分析（股票+大盘）
-          - 市场-only   # 仅大盘复盘
-          - 仅股票   # 仅股票分析
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '运行模式'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full          # 完整分析（股票+大盘）
+          - market-only   # 仅大盘复盘
+          - stocks-only   # 仅股票分析
 
 # 并发控制：同一时间只运行一个分析任务
-并发:
-  组: 股票分析
-  取消进行中： false
+concurrency:
+  group: stock-analysis
+  cancel-in-progress: false
 
-工作:
-  分析:
-    运行于：ubuntu-latest
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
     # 添加超时限制，防止任务卡死
-    超时分钟数：30
+    timeout-minutes: 30
     
-    步骤:
-      - 名称: 随机延迟（避免固定时间访问）
-        运行： sleep $((RANDOM % 61))  # 随机延迟0-60秒启动
+    steps:
+      - name: 随机延迟（避免固定时间访问）
+        run: sleep $((RANDOM % 60))  # 随机延迟0-60秒启动
       
-      - 名称: 检出代码
-        使用：actions/checkout@v5
+      - name: 检出代码
+        uses: actions/checkout@v4
       
       - name: 设置 Python 环境
-        使用：actions/setup-python@v6
-        与：
-          python-version：'3.11'
-          缓存：'pip'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
       
-      - 名称: 安装依赖
-        运行： |
-          使用pip升级pip：pip install --upgrade pip
-          使用pip安装 requirements.txt 中的依赖项：pip install -r requirements.txt
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
       
-      - 名称: 创建必要目录
-        运行： |
+      - name: 创建必要目录
+        run: |
           mkdir -p data logs reports
       
-      - 名称: 执行股票分析
-        环境:
+      - name: 执行股票分析
+        env:
           # ==========================================
           # AI 配置
           # ==========================================
