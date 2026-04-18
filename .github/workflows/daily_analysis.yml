@@ -61,9 +61,9 @@ jobs:
           ALIYUN_BAILIAN_MODEL: ${{ vars.ALIYUN_BAILIAN_MODEL || 'qwen-max' }}  # 或者 qwen-plus, qwen-turbo
           # Gemini AI（首选）
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL：${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
-          GEMINI_MODEL_FALLBACK：${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
-          GEMINI_REQUEST_DELAY：'3.0'
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
+          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
+          GEMINI_REQUEST_DELAY: '3.0'
           
           # OpenAI 兼容 API（备选）
           OPENAI_API_KEY：${{ secrets.OPENAI_API_KEY }}
