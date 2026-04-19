@@ -1,4 +1,5 @@
 name: 每日股票分析
+
 on:
   schedule:
     - cron: 0 10 * * 1-5
