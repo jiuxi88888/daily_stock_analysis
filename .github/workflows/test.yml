@@ -1,8 +1,30 @@
-name: Test Workflow
-on: [workflow_dispatch]
+name: Stock Analysis
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+
 jobs:
-  test:
+  analyze:
     runs-on: ubuntu-latest
     steps:
-      - name: Hello
-        run: echo "Hello World"
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy requests tushare akshare efinance
+      
+      - name: Create directories
+        run: |
+          mkdir -p data logs reports
+      
+      - name: Run analysis
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+        run: |
+          python main.py
