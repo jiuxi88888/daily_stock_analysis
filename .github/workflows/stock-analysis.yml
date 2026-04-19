@@ -2,215 +2,70 @@ name: 每日股票分析
 
 on:
   schedule:
-    - cron: 0 10 * * 1-5
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
-        description: 运行模式
+        description: '运行模式'
         required: true
-        default: full
+        default: 'full'
         type: choice
         options:
           - full
           - market-only
           - stocks-only
 
-concurrency:
-  group: stock-analysis
-  cancel-in-progress: false
-
 jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      # 环境变量统一在此处定义，便于管理
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
-      GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
-      GEMINI_REQUEST_DELAY: "3.0"
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
-      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || secrets.OPENAI_MODEL }}
-      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-      BOCHA_API_KEYS: ${{ secrets.BOCHA_API_KEYS }}
-      TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
-      SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
-      WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
-      WECHAT_MSG_TYPE: ${{ vars.WECHAT_MSG_TYPE || secrets.WECHAT_MSG_TYPE || 'markdown' }}
-      FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
-      EMAIL_SENDER: ${{ vars.EMAIL_SENDER || secrets.EMAIL_SENDER }}
-      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-      EMAIL_RECEIVERS: ${{ vars.EMAIL_RECEIVERS || secrets.EMAIL_RECEIVERS }}
-      EMAIL_SENDER_NAME: ${{ vars.EMAIL_SENDER_NAME || secrets.EMAIL_SENDER_NAME || 'daily_stock_analysis股票分析助手' }}
-      PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
-      PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
-      PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-      CUSTOM_WEBHOOK_URLS: ${{ secrets.CUSTOM_WEBHOOK_URLS }}
-      CUSTOM_WEBHOOK_BEARER_TOKEN: ${{ secrets.CUSTOM_WEBHOOK_BEARER_TOKEN }}
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-      DISCORD_MAIN_CHANNEL_ID: ${{ secrets.DISCORD_MAIN_CHANNEL_ID }}
-      FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
-      FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-      FEISHU_FOLDER_TOKEN: ${{ secrets.FEISHU_FOLDER_TOKEN }}
-      ASTRBOT_URL: ${{ secrets.ASTRBOT_URL }}
-      ASTRBOT_TOKEN: ${{ secrets.ASTRBOT_TOKEN }}
-      SERVERCHAN3_SENDKEY: ${{ secrets.SERVERCHAN3_SENDKEY }}
-      STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || '600519' }}
-      REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
-      SINGLE_STOCK_NOTIFY: ${{ vars.SINGLE_STOCK_NOTIFY || secrets.SINGLE_STOCK_NOTIFY || 'false' }}
-      MARKET_REVIEW_ENABLED: ${{ vars.MARKET_REVIEW_ENABLED || secrets.MARKET_REVIEW_ENABLED || 'true' }}
-      ANALYSIS_DELAY: ${{ vars.ANALYSIS_DELAY || secrets.ANALYSIS_DELAY || '0' }}
-      LOG_LEVEL: INFO
-      MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '1' }}
-      ENABLE_CHIP_DISTRIBUTION: "false"
-      REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
-
+    
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # 获取完整历史记录
-
-      - name: 设置 Python 环境
+      
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
-
+          python-version: '3.11'
+          cache: 'pip'
+      
       - name: 安装依赖
         run: |
-          set -e  # 遇到错误立即退出
-          if [ -f requirements.txt ]; then
-            pip install --upgrade pip
-            pip install -r requirements.txt
-          else
-            echo "警告: 未找到 requirements.txt 文件"
-          fi
-
-      - name: 创建必要目录
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 创建目录
         run: |
           mkdir -p data logs reports
-
-      - name: 验证必要配置
-        run: |
-          set -e
-          
-          echo "=========================================="
-          echo "📋 配置验证"
-          echo "=========================================="
-          
-          # 检查必需的API密钥
-          if [ -z "$GEMINI_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
-            echo "❌ 错误: 必须配置至少一个AI API密钥 (GEMINI_API_KEY 或 OPENAI_API_KEY)"
-            exit 1
-          fi
-          
-          if [ -z "$TUSHARE_TOKEN" ]; then
-            echo "❌ 错误: 必须配置 TUSHARE_TOKEN"
-            exit 1
-          fi
-          
-          echo "✅ 必需的API密钥已配置"
-          
-          # 显示配置摘要
-          echo ""
-          echo "📊 配置摘要:"
-          echo "  AI服务: $(if [ -n "$GEMINI_API_KEY" ]; then echo "Gemini"; fi) $(if [ -n "$OPENAI_API_KEY" ]; then echo "OpenAI"; fi)"
-          echo "  数据源: TuShare"
-          echo "  股票列表: $STOCK_LIST"
-          echo "  报告类型: $REPORT_TYPE"
-
-      - name: 随机延迟（避免固定时间访问）
-        run: |
-          DELAY=$((RANDOM % 60))
-          echo "等待 $DELAY 秒以避免API访问冲突..."
-          sleep $DELAY
-
+      
       - name: 执行股票分析
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          STOCK_LIST: ${{ secrets.STOCK_LIST || '600519' }}
+          REPORT_TYPE: 'simple'
+          LOG_LEVEL: 'INFO'
         run: |
-          set -e
-          
-          # 确定运行模式
-          MODE="${{ github.event.inputs.mode || 'full' }}"
-          
-          echo "=========================================="
-          echo "🚀 A股自选股智能分析系统"
-          echo "=========================================="
-          echo "⏰ 时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
-          echo "🎯 运行模式: $MODE"
-          echo "📊 自选股: $STOCK_LIST"
-          echo "📝 报告类型: $REPORT_TYPE"
-          echo ""
-          
-          # 根据模式执行不同命令
-          case $MODE in
-            "market-only")
-              echo "📈 执行市场分析..."
-              python main.py --market-review
-              ;;
-            "stocks-only")
-              echo "📊 执行个股分析..."
-              python main.py --no-market-review
-              ;;
-            "full"|*)
-              echo "🔄 执行完整分析..."
-              python main.py
-              ;;
-          esac
-
-      - name: 检查分析结果
-        run: |
-          echo "=========================================="
-          echo "🔍 检查分析结果"
-          echo "=========================================="
-          
-          if [ -d "reports" ] && [ "$(ls -A reports 2>/dev/null)" ]; then
-            echo "✅ 报告生成成功:"
-            find reports -type f -name "*.json" -o -name "*.md" -o -name "*.txt" | head -10
-          else
-            echo "⚠️ 警告: 未生成报告文件"
-          fi
-          
-          if [ -d "logs" ] && [ "$(ls -A logs 2>/dev/null)" ]; then
-            echo "📄 日志文件:"
-            ls -la logs/
-            
-            # 显示最新的日志内容
-            LATEST_LOG=$(find logs -name "*.log" -type f -newest)
-            if [ -n "$LATEST_LOG" ]; then
-              echo "最近的日志内容 (最后20行):"
-              tail -20 "$LATEST_LOG"
-            fi
-          else
-            echo "⚠️ 未发现日志文件"
-          fi
-
-      - name: 上传分析报告
+          echo "开始股票分析..."
+          python main.py
+      
+      - name: 上传报告
         uses: actions/upload-artifact@v4
-        if: success() || failure()  # 无论成功还是失败都上传日志
+        if: always()
         with:
-          name: analysis-reports-${{ github.run_number }}-${{ github.sha }}
+          name: stock-reports
           path: |
-            reports/**
-            logs/**
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: 清理敏感信息
+            reports/
+            logs/
+          retention-days: 7
+      
+      - name: 显示结果
         if: always()
         run: |
-          echo "::add-mask::$GEMINI_API_KEY"
-          echo "::add-mask::$OPENAI_API_KEY"
-          echo "::add-mask::$TUSHARE_TOKEN"
-          echo "::add-mask::$EMAIL_PASSWORD"
-          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
-          echo "::add-mask::$PUSHOVER_USER_KEY"
-          echo "::add-mask::$PUSHOVER_API_TOKEN"
-          echo "::add-mask::$PUSHPLUS_TOKEN"
-          
-          echo "敏感信息已屏蔽"
+          echo "分析完成！"
+          if [ -d "reports" ]; then
+            echo "生成的报告："
+            ls -la reports/
+          fi
