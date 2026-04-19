@@ -2,13 +2,13 @@ name: 每日股票分析
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5'
+    - cron: '0 10 * * 1-5'  # 周一到周五，北京时间18:00
   workflow_dispatch:
     inputs:
       mode:
         description: '运行模式'
         required: true
-        default: 'full'
+        default: 'stocks-only'
         type: choice
         options:
           - full
@@ -19,16 +19,13 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       
       - name: 安装依赖
         run: |
@@ -41,12 +38,13 @@ jobs:
       
       - name: 执行股票分析
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: 'https://api.bianxie.ai/v1'
+          AI_MODEL: 'gpt-4'
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          STOCK_LIST: ${{ secrets.STOCK_LIST || '600519' }}
+          STOCK_LIST: '600519,000001'
           REPORT_TYPE: 'simple'
-          LOG_LEVEL: 'INFO'
         run: |
           echo "开始股票分析..."
           python main.py
