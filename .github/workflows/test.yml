@@ -43,7 +43,7 @@ jobs:
           AI_MODEL: 'gpt-4'
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          STOCK_LIST: '600519,000001'
+          STOCK_LIST: ${{ vars.STOCK_LIST || '600519,000001,000858' }}
           REPORT_TYPE: 'simple'
         run: |
           echo "开始股票分析..."
