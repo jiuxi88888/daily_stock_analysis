@@ -1,27 +1,71 @@
-name: Stock Analysis
+name: 每日股票分析
 
 on:
+  schedule:
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: '运行模式'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - market-only
+          - stocks-only
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v4
       
-      - name: Setup Python
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
-      - name: Install dependencies
+      - name: 安装依赖
         run: |
           pip install --upgrade pip
-          pip install pandas numpy requests
+          pip install -r requirements.txt
       
-      - name: Run analysis
-        env:
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      - name: 创建目录
         run: |
+          mkdir -p data logs reports
+      
+      - name: 执行股票分析
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          STOCK_LIST: ${{ secrets.STOCK_LIST || '600519' }}
+          REPORT_TYPE: 'simple'
+          LOG_LEVEL: 'INFO'
+        run: |
+          echo "开始股票分析..."
           python main.py
+      
+      - name: 上传报告
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-reports
+          path: |
+            reports/
+            logs/
+          retention-days: 7
+      
+      - name: 显示结果
+        if: always()
+        run: |
+          echo "分析完成！"
+          if [ -d "reports" ]; then
+            echo "生成的报告："
+            ls -la reports/
+          fi
