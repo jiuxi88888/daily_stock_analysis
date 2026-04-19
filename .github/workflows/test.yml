@@ -1,30 +1,69 @@
-name: Stock Analysis
+name: 每日股票分析
+
 on:
   schedule:
-    - cron: '0 10 * * 1-5'
+    - cron: '0 10 * * 1-5'  # 周一到周五，北京时间18:00
   workflow_dispatch:
+    inputs:
+      mode:
+        description: '运行模式'
+        required: true
+        default: 'stocks-only'
+        type: choice
+        options:
+          - full
+          - market-only
+          - stocks-only
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Python
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       
-      - name: Install dependencies
+      - name: 安装依赖
         run: |
-          pip install pandas numpy requests tushare akshare efinance
+          pip install --upgrade pip
+          pip install -r requirements.txt
       
-      - name: Create directories
+      - name: 创建目录
         run: |
           mkdir -p data logs reports
       
-      - name: Run analysis
+      - name: 执行股票分析
         env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: 'https://api.bianxie.ai/v1'
+          AI_MODEL: 'gpt-4'
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          STOCK_LIST: '600519,000001'
+          REPORT_TYPE: 'simple'
         run: |
+          echo "开始股票分析..."
           python main.py
+      
+      - name: 上传报告
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-reports
+          path: |
+            reports/
+            logs/
+          retention-days: 7
+      
+      - name: 显示结果
+        if: always()
+        run: |
+          echo "分析完成！"
+          if [ -d "reports" ]; then
+            echo "生成的报告："
+            ls -la reports/
+          fi
