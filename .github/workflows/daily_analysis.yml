@@ -1,12 +1,8 @@
 name: 每日股票分析
 
-# 解决Node.js版本警告
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 on:
   schedule:
-    - cron: '0 10 * * 1-5'
+    - cron: '10 11 * * 1-5'  # 每周一到周五 11:10
   workflow_dispatch:
     inputs:
       mode:
@@ -24,16 +20,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 移到这里
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: 'https://api.bianxie.ai/v1'
+      AI_MODEL: 'gpt-4o'  # 建议用 gpt-4o，bianxie 常用这个
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+      STOCK_LIST: ${{ vars.STOCK_LIST || '600519,000001,000858' }}
+      REPORT_TYPE: 'simple'
+      LOG_LEVEL: 'INFO'
+    
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-      
+
       - name: 设置Python环境
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'  # ← 新增缓存
-      
+          cache: 'pip'
+
       - name: 安装依赖
         run: |
           pip install --upgrade pip
@@ -42,21 +49,11 @@ jobs:
           else
             pip install pandas numpy requests tushare akshare efinance openai
           fi
-      
+
       - name: 创建目录
-        run: |
-          mkdir -p data logs reports
-      
+        run: mkdir -p data logs reports
+
       - name: 执行股票分析
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: 'https://api.bianxie.ai/v1'  # ← 修正为正确地址
-          AI_MODEL: 'gpt-4'
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          STOCK_LIST: ${{ vars.STOCK_LIST || '600519,000001,000858' }}
-          REPORT_TYPE: 'simple'
-          LOG_LEVEL: 'INFO'
         run: |
           echo "=== 开始股票分析 ==="
           echo "时间: $(date)"
@@ -64,21 +61,19 @@ jobs:
           echo "AI接口地址: $OPENAI_BASE_URL"
           echo "AI模型: $AI_MODEL"
           echo "API Key 是否已设置: $([ -n "$OPENAI_API_KEY" ] && echo '是' || echo '否')"
-          
           python main.py
-          
           echo "=== 分析完成 ==="
-      
+
       - name: 上传报告
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: stock-reports
+          name: stock-reports-${{ github.run_number }}
           path: |
             reports/
             logs/
           retention-days: 7
-      
+
       - name: 显示结果
         if: always()
         run: |
