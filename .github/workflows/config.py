@@ -1,50 +1,56 @@
 """
-配置管理模块 - 适配便携AI版本
+配置管理模块 - 升级版
 """
+
 import os
 import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
 from enum import Enum
 
+
 class ReportType(str, Enum):
     """报告类型枚举"""
-    SIMPLE = "simple"    # 简洁报告
-    DETAIL = "detail"    # 详细报告
-    CONCISE = "concise"  # 精简报告
+    SIMPLE = "simple"      # 简洁报告
+    DETAIL = "detail"     # 详细报告
+    CONCISE = "concise"    # 精简报告
+
 
 @dataclass
 class AIConfig:
-    """AI 配置 - 适配便携AI"""
-    # 便携AI使用OpenAI兼容接口
-    api_key: str = ""  # 便携AI的sk-xxx密钥
-    base_url: str = "https://api.bianxie.ai/v1"  # 便携AI接口地址
-    model: str = "gpt-4"  # 便携AI支持的模型
+    """AI 配置"""
+    # 兼容接口
+    api_key: str = ""
+    base_url: str = "https://api.bianxie.ai/v1"
+    model: str = "gpt-4o"
     
     # AI参数配置
     temperature: float = 0.7
     max_tokens: int = 1000
     timeout: int = 30
-    request_delay: float = 2.0  # 请求延迟
+    request_delay: float = 2.0
+
 
 @dataclass
 class DataSourceConfig:
     """数据源配置"""
-    tushare_token: str = ""  # Tushare Pro令牌
+    tushare_token: str = ""
     
     # 实时数据源优先级
     realtime_source_priority: List[str] = field(default_factory=lambda: [
-        "tencent",      # 腾讯财经
-        "akshare_sina", # 新浪财经
-        "efinance"      # 东方财富
+        "tencent",
+        "akshare_sina",
+        "efinance"
     ])
+
 
 @dataclass
 class NotificationConfig:
     """通知配置"""
-    pushplus_token: str = ""  # PushPlus令牌
-    wechat_webhook_url: str = ""  # 企业微信Webhook
-    wechat_msg_type: str = "markdown"  # 消息类型
+    pushplus_token: str = ""
+    wechat_webhook_url: str = ""
+    wechat_msg_type: str = "markdown"
+
 
 @dataclass
 class RuntimeConfig:
@@ -56,13 +62,18 @@ class RuntimeConfig:
     report_type: ReportType = ReportType.SIMPLE
     
     # 功能开关
-    market_review_enabled: bool = True  # 是否分析大盘
-    single_stock_notify: bool = False   # 单只股票通知
-    analysis_delay: float = 1.0         # 分析延迟（秒）
+    market_review_enabled: bool = True
+    single_stock_notify: bool = False
+    analysis_delay: float = 1.0
+    
+    # ========== 精选功能配置 ==========
+    enable_selection: bool = True   # 启用精选功能
+    selection_count: int = 8        # 精选股票数量
     
     # 系统配置
     log_level: str = "INFO"
     max_workers: int = 1
+
 
 @dataclass
 class Config:
@@ -80,7 +91,7 @@ class Config:
         # ========== AI 配置 ==========
         config.ai.api_key = os.getenv('OPENAI_API_KEY', '')
         config.ai.base_url = os.getenv('OPENAI_BASE_URL', 'https://api.bianxie.ai/v1')
-        config.ai.model = os.getenv('AI_MODEL', 'gpt-4')
+        config.ai.model = os.getenv('AI_MODEL', 'gpt-4o')
         config.ai.temperature = float(os.getenv('AI_TEMPERATURE', '0.7'))
         config.ai.max_tokens = int(os.getenv('AI_MAX_TOKENS', '1000'))
         config.ai.timeout = int(os.getenv('AI_TIMEOUT', '30'))
@@ -88,7 +99,6 @@ class Config:
         
         # ========== 数据源配置 ==========
         config.data_source.tushare_token = os.getenv('TUSHARE_TOKEN', '')
-        
         priority_str = os.getenv('REALTIME_SOURCE_PRIORITY', 'tencent,akshare_sina,efinance')
         config.data_source.realtime_source_priority = [
             s.strip() for s in priority_str.split(',') if s.strip()
@@ -122,6 +132,10 @@ class Config:
         )
         config.runtime.analysis_delay = float(os.getenv('ANALYSIS_DELAY', '1.0'))
         
+        # ========== 精选功能配置 ==========
+        config.runtime.enable_selection = os.getenv('ENABLE_SELECTION', 'true').lower() == 'true'
+        config.runtime.selection_count = int(os.getenv('SELECTION_COUNT', '8'))
+        
         # 系统配置
         config.runtime.log_level = os.getenv('LOG_LEVEL', 'INFO')
         config.runtime.max_workers = int(os.getenv('MAX_WORKERS', '1'))
@@ -135,18 +149,18 @@ class Config:
         # 检查必需配置
         if not self.data_source.tushare_token:
             errors.append("❌ TUSHARE_TOKEN 未配置")
-            
+        
         if not self.ai.api_key:
-            errors.append("❌ OPENAI_API_KEY 未配置（便携AI密钥）")
-            
+            errors.append("❌ OPENAI_API_KEY 未配置")
+        
         # 检查通知配置
         if not self.notification.pushplus_token and not self.notification.wechat_webhook_url:
-            errors.append("⚠️  至少配置一个通知渠道 (PUSHPLUS_TOKEN 或 WECHAT_WEBHOOK_URL)")
-            
+            errors.append("⚠️ 至少配置一个通知渠道")
+        
         return errors
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典（用于日志）"""
+        """转换为字典"""
         return {
             "ai": {
                 "model": self.ai.model,
@@ -160,23 +174,24 @@ class Config:
             "runtime": {
                 "stock_list": self.runtime.stock_list,
                 "report_type": self.runtime.report_type.value,
-                "market_review": self.runtime.market_review_enabled
+                "market_review": self.runtime.market_review_enabled,
+                "enable_selection": self.runtime.enable_selection,
+                "selection_count": self.runtime.selection_count
             }
         }
     
     def log_config(self, logger: logging.Logger):
         """记录配置信息"""
         config_dict = self.to_dict()
-        
         logger.info("📋 当前配置:")
-        logger.info(f"  📈 分析股票: {', '.join(self.runtime.stock_list)}")
-        logger.info(f"  🤖 AI模型: {self.ai.model}")
-        logger.info(f"  🔗 AI接口: {self.ai.base_url}")
-        logger.info(f"  📊 数据源: {', '.join(self.data_source.realtime_source_priority)}")
-        logger.info(f"  📝 报告类型: {self.runtime.report_type.value}")
+        logger.info(f" 📈 分析股票: {', '.join(self.runtime.stock_list)}")
+        logger.info(f" 🤖 AI模型: {self.ai.model}")
+        logger.info(f" 🔗 AI接口: {self.ai.base_url}")
+        logger.info(f" 📊 数据源: {', '.join(self.data_source.realtime_source_priority)}")
+        logger.info(f" 📝 报告类型: {self.runtime.report_type.value}")
+        logger.info(f" 🎯 精选功能: {'开启' if self.runtime.enable_selection else '关闭'} ({self.runtime.selection_count}只)")
         
-        # 检查通知配置
         if self.notification.pushplus_token:
-            logger.info("  📱 通知: PushPlus ✓")
+            logger.info(" 📱 通知: PushPlus ✓")
         if self.notification.wechat_webhook_url:
-            logger.info("  💬 通知: 企业微信 ✓")
+            logger.info(" 💬 通知: 企业微信 ✓")
