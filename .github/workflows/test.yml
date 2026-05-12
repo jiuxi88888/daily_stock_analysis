@@ -2,7 +2,7 @@ name: 每日股票分析
 
 on:
   schedule:
-    - cron: '10 11 * * 1-5'  # 每周一到周五 11:10
+    - cron: '10 3 * * 1-5'  # 每周一到周五 UTC时间3:10 = 北京时间11:10
   workflow_dispatch:
     inputs:
       mode:
@@ -21,10 +21,10 @@ jobs:
     timeout-minutes: 30
     
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 移到这里
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: 'https://api.bianxie.ai/v1'
-      AI_MODEL: 'gpt-4o'  # 建议用 gpt-4o，bianxie 常用这个
+      AI_MODEL: 'gpt-4o'
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
       STOCK_LIST: ${{ vars.STOCK_LIST || '600519,000001,000858' }}
