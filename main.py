@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-A股股票分析系统 - 升级版
+A股股票分析系统 - 升级版 v2.0
 增强功能：
-1. 全市场扫描精选股票
+1. 自选股分析 + 精选8只优质股票
 2. 技术指标分析（MACD、KDJ、RSI、布林带）
-3. 资金流向追踪
-4. AI专业分析框架
-5. 精选8只优质股票
+3. AI专业分析框架
 """
 
 import os
@@ -14,15 +12,88 @@ import sys
 import logging
 from datetime import datetime
 
-# 添加当前目录到路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 添加src目录到路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from config import Config
-from data_loader import DataLoader
-from analyzer import StockAnalyzer, AIEngine
-from notifier import Notifier
-from utils import setup_logging, create_report
+from src.config import get_config
+from src.data_loader import DataLoader
+from src.analyzer import StockAnalyzer, AIEngine
+from src.notifier import Notifier
 
+def setup_logging():
+    """设置日志"""
+    log_dir = './logs'
+    os.makedirs(log_dir, exist_ok=True)
+    
+    log_file = os.path.join(log_dir, f"analysis_{datetime.now().strftime('%Y%m%d')}.log")
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+
+def create_report(results: list, market_data: dict) -> str:
+    """生成分析报告"""
+    report = f"""# 📈 股票分析报告 - {datetime.now().strftime('%Y-%m-%d')}
+
+## 🎯 大盘概览
+"""
+    
+    if market_data:
+        report += f"""
+- 上证指数: {market_data.get('上证指数', {}).get('涨跌幅', 'N/A')}
+- 深证成指: {market_data.get('深证成指', {}).get('涨跌幅', 'N/A')}
+- 创业板: {market_data.get('创业板指', {}).get('涨跌幅', 'N/A')}
+"""
+    
+    # 分类统计
+    selected = [r for r in results if r.get('is_selected', False)]
+    self_stocks = [r for r in results if not r.get('is_selected', False)]
+    
+    report += f"""
+---
+
+## 📊 分析结果汇总
+
+**自选股: {len(self_stocks)} 只** | **精选股: {len(selected)} 只**
+
+"""
+    
+    # 自选股
+    if self_stocks:
+        report += "### 📌 自选股\n\n"
+        for r in self_stocks:
+            if 'error' in r:
+                report += f"- **{r['code']}**: ❌ {r['error']}\n"
+            else:
+                decision = r.get('decision', '')
+                score = r.get('ai_score', 0)
+                report += f"- **{r.get('name', r['code'])}**({r['code']}): {decision} | 评分 {score}\n"
+        report += "\n"
+    
+    # 精选股
+    if selected:
+        report += "### 🎯 精选股票\n\n"
+        for r in selected:
+            if 'error' not in r:
+                decision = r.get('decision', '')
+                score = r.get('ai_score', 0)
+                reason = r.get('selection_reason', '')
+                report += f"- **{r.get('name', r['code'])}**({r['code']}): {decision} | 评分 {score}\n"
+                if reason:
+                    report += f"  - 精选理由: {reason}\n"
+        report += "\n"
+    
+    report += f"""
+---
+*报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+"""
+    
+    return report
 
 def main():
     """主函数"""
@@ -35,18 +106,13 @@ def main():
     logger.info("=" * 60)
     
     # 加载配置
-    config = Config.load()
+    config = get_config()
     
     # 验证配置
-    errors = config.validate()
-    if errors:
-        logger.error("配置错误:")
-        for error in errors:
-            logger.error(f"  - {error}")
-        return False
-    
-    logger.info(f"AI模型: {config.ai.model}")
-    logger.info(f"报告类型: {config.runtime.report_type.value}")
+    warnings = config.validate()
+    if warnings:
+        for w in warnings:
+            logger.warning(w)
     
     # 创建目录
     os.makedirs('reports', exist_ok=True)
@@ -60,51 +126,37 @@ def main():
         stock_analyzer = StockAnalyzer(data_loader, ai_engine, config)
         notifier = Notifier(config)
         
-        logger.info("✅ 所有组件初始化成功")
+        logger.info("✅ 组件初始化成功")
         
-        # ========== 升级版核心功能 ==========
-        
+        # ========== 分析自选股 ==========
         all_results = []
         
-        # 1. 分析自选股票（如果有配置）
-        if config.runtime.stock_list:
-            logger.info(f"📈 第一部分：分析自选股 {len(config.runtime.stock_list)} 只")
-            logger.info(f"股票列表: {', '.join(config.runtime.stock_list)}")
-            
-            results = stock_analyzer.analyze_stocks(config.runtime.stock_list)
-            all_results.extend(results)
-            
-            success_count = sum(1 for r in results if 'error' not in r)
-            logger.info(f"✅ 自选股分析完成: {success_count}/{len(results)} 成功")
+        if config.stock_list:
+            logger.info(f"📈 分析自选股: {len(config.stock_list)} 只")
+            self_results = stock_analyzer.analyze_stocks(config.stock_list)
+            all_results.extend(self_results)
+            logger.info(f"✅ 自选股完成: {len([r for r in self_results if 'error' not in r])}/{len(self_results)}")
         
-        # 2. 精选股票分析（升级版核心功能）
-        if config.runtime.enable_selection:
-            selected_count = getattr(config.runtime, 'selection_count', 8)
-            logger.info(f"🎯 第二部分：精选市场优质股票（目标: {selected_count}只）")
-            
-            selected_results = stock_analyzer.select_and_analyze(count=selected_count)
+        # ========== 精选股票 ==========
+        enable_selection = os.getenv('ENABLE_SELECTION', 'true').lower() == 'true'
+        selection_count = int(os.getenv('SELECTION_COUNT', '8'))
+        
+        if enable_selection:
+            logger.info(f"🎯 精选股票（目标: {selection_count}只）")
+            selected_results = stock_analyzer.select_and_analyze(count=selection_count)
             
             if selected_results:
-                # 标记为精选股
-                for r in selected_results:
-                    r['is_selected'] = True
-                
                 all_results.extend(selected_results)
-                logger.info(f"✅ 精选完成，共 {len(selected_results)} 只")
+                logger.info(f"✅ 精选完成: {len(selected_results)} 只")
             else:
                 logger.warning("⚠️ 精选功能未返回结果")
         
-        # 统计总结果
-        total = len(all_results)
-        success = sum(1 for r in all_results if 'error' not in r)
-        selected = sum(1 for r in all_results if r.get('is_selected', False))
-        
-        logger.info(f"📊 总计：分析 {total} 只股票，成功 {success} 只（包含 {selected} 只精选）")
-        
-        # 3. 获取大盘数据
+        # ========== 获取大盘数据 ==========
+        logger.info("📊 获取大盘数据...")
         market_data = data_loader.get_market_index()
         
-        # 4. 生成报告
+        # ========== 生成报告 ==========
+        logger.info("📝 生成报告...")
         report_content = create_report(all_results, market_data)
         
         # 保存报告
@@ -114,25 +166,27 @@ def main():
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write(report_content)
         
-        logger.info(f"📄 报告已保存: {report_file}")
+        logger.info(f"✅ 报告已保存: {report_file}")
         
-        # 5. 发送通知
-        notification_title = f"📈 股票分析 {datetime.now().strftime('%m-%d')}"
-        notification_content = f"分析完成\n"
-        notification_content += f"- 自选股: {success}/{len(config.runtime.stock_list) if config.runtime.stock_list else 0} 成功\n"
-        if selected > 0:
-            notification_content += f"- 精选股: {selected} 只\n"
-        notification_content += f"- 总计: {total} 只"
+        # ========== 发送通知 ==========
+        total = len(all_results)
+        success = len([r for r in all_results if 'error' not in r])
+        selected_count = len([r for r in all_results if r.get('is_selected', False)])
         
-        notifier.send_all(notification_title, notification_content)
+        title = f"📈 股票分析 {datetime.now().strftime('%m-%d')}"
+        content = f"分析完成\n- 自选股: {success}/{len(config.stock_list)} 成功\n"
+        if selected_count > 0:
+            content += f"- 精选股: {selected_count} 只\n"
+        content += f"- 总计: {total} 只"
+        
+        notifier.send_all(title, content)
         
         logger.info("✅ 所有任务完成")
         return True
         
     except Exception as e:
-        logger.error(f"❌ 分析过程出错: {e}", exc_info=True)
+        logger.error(f"❌ 任务失败: {e}", exc_info=True)
         return False
-
 
 if __name__ == "__main__":
     success = main()
