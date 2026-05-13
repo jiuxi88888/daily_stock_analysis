@@ -122,7 +122,13 @@ class DataLoader:
         """从efinance获取数据"""
         try:
             stock_code = f"{symbol}.SH" if symbol.startswith('6') else f"{symbol}.SZ"
-            df = ef.stock.get_quote_history(stock_code, klt=1)
+            df = ak.stock_zh_a_hist(
+                symbol=stock_code.replace('.SH', '').replace('.SZ', ''),
+                period="daily",
+                start_date=(datetime.now() - timedelta(days=30)).strftime('%Y%m%d'),
+                end_date=datetime.now().strftime('%Y%m%d'),
+                adjust=""
+            )
             if df is not None and not df.empty:
                 latest = df.iloc[-1]
                 return {
@@ -165,31 +171,21 @@ class DataLoader:
     # ========== 新增功能 ==========
     
     def scan_market(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """
-        全市场扫描，筛选优质股票
-        返回涨幅前N只股票
-        """
+        """全市场扫描，筛选优质股票"""
         try:
             logger.info(f"🔍 开始全市场扫描...")
             
-            # 获取全市场数据
             df = ak.stock_zh_a_spot_em()
             
             if df is None or df.empty:
                 logger.error("❌ 获取全市场数据失败")
                 return []
             
-            # 数据清洗和筛选
-            df = df[df['代码'].str.startswith(('0', '3', '6'))]  # 只保留主板
-            
-            # 过滤条件
-            df = df[~df['名称'].str.contains('ST|退市|N', na=False)]  # 排除ST
-            df = df[df['成交额'] > 1e8]  # 成交额大于1亿
-            
-            # 按涨幅排序
+            df = df[df['代码'].str.startswith(('0', '3', '6'))]
+            df = df[~df['名称'].str.contains('ST|退市|N', na=False)]
+            df = df[df['成交额'] > 1e8]
             df = df.sort_values('涨跌幅', ascending=False)
             
-            # 取前N只
             top_stocks = df.head(limit)
             
             result = []
@@ -206,7 +202,7 @@ class DataLoader:
                         'open': float(row['今开']),
                         'high': float(row['最高']),
                         'low': float(row['最低']),
-                        'amplitude': float(row['振幅']) if '振幅' in row else 0,
+                        'amplitude': float(row.get('振幅', 0)) if '振幅' in row else 0,
                     }
                     result.append(stock)
                 except:
@@ -220,20 +216,9 @@ class DataLoader:
             return []
     
     def get_kline_data(self, symbol: str, period: str = 'daily', count: int = 60) -> Optional[pd.DataFrame]:
-        """
-        获取K线数据
-        period: daily/weekly/monthly
-        count: 获取多少根K线
-        """
+        """获取K线数据"""
         try:
             stock_code = f"{symbol}.SH" if symbol.startswith('6') else f"{symbol}.SZ"
-            
-            if period == 'daily':
-                klt = 101
-            elif period == 'weekly':
-                klt = 102
-            else:
-                klt = 103
             
             df = ak.stock_zh_a_hist(
                 symbol=stock_code.replace('.SH', '').replace('.SZ', ''),
@@ -254,9 +239,7 @@ class DataLoader:
             return None
     
     def calculate_technical_indicators(self, kline_df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        计算技术指标
-        """
+        """计算技术指标"""
         if kline_df is None or kline_df.empty:
             return {}
         
@@ -268,12 +251,12 @@ class DataLoader:
             
             indicators = {}
             
-            # 1. MA均线
+            # MA均线
             indicators['ma5'] = round(close.tail(5).mean(), 2)
             indicators['ma10'] = round(close.tail(10).mean(), 2)
             indicators['ma20'] = round(close.tail(20).mean(), 2)
             
-            # 2. MACD
+            # MACD
             exp1 = close.ewm(span=12, adjust=False).mean()
             exp2 = close.ewm(span=26, adjust=False).mean()
             macd = 2 * (exp1 - exp2)
@@ -283,15 +266,14 @@ class DataLoader:
             indicators['macd_signal'] = round(signal.iloc[-1], 3)
             indicators['macd_histogram'] = round(macd.iloc[-1] - signal.iloc[-1], 3)
             
-            # MACD状态
             if indicators['macd'] > 0 and indicators['macd'] > indicators['macd_signal']:
-                indicators['macd_signal'] = '金叉（看涨）'
+                indicators['macd_status'] = '金叉（看涨）'
             elif indicators['macd'] < 0 and indicators['macd'] < indicators['macd_signal']:
-                indicators['macd_signal'] = '死叉（看跌）'
+                indicators['macd_status'] = '死叉（看跌）'
             else:
-                indicators['macd_signal'] = '震荡'
+                indicators['macd_status'] = '震荡'
             
-            # 3. KDJ
+            # KDJ
             n = 9
             low_n = low.rolling(window=n).min()
             high_n = high.rolling(window=n).max()
@@ -305,15 +287,14 @@ class DataLoader:
             indicators['kdj_d'] = round(d.iloc[-1], 2)
             indicators['kdj_j'] = round(j.iloc[-1], 2)
             
-            # KDJ状态
-            if indicators['kdj_k'] > indicators['kdj_d'] and indicators['kdj_j'] < 80:
+            if indicators['kdj_k'] > indicators['kdj_d']:
                 indicators['kdj_signal'] = '金叉'
-            elif indicators['kdj_k'] < indicators['kdj_d'] and indicators['kdj_j'] > 20:
+            elif indicators['kdj_k'] < indicators['kdj_d']:
                 indicators['kdj_signal'] = '死叉'
             else:
                 indicators['kdj_signal'] = '震荡'
             
-            # 4. RSI
+            # RSI
             rsi_period = 14
             delta = close.diff()
             gain = delta.where(delta > 0, 0).rolling(window=rsi_period).mean()
@@ -321,7 +302,6 @@ class DataLoader:
             rs = gain / loss
             indicators['rsi'] = round(100 - (100 / (1 + rs)).iloc[-1], 2)
             
-            # RSI状态
             if indicators['rsi'] > 70:
                 indicators['rsi_signal'] = '超买'
             elif indicators['rsi'] < 30:
@@ -329,7 +309,7 @@ class DataLoader:
             else:
                 indicators['rsi_signal'] = '正常'
             
-            # 5. 布林带
+            # 布林带
             bb_period = 20
             bb_std = close.rolling(window=bb_period).std()
             bb_ma = close.rolling(window=bb_period).mean()
@@ -346,7 +326,7 @@ class DataLoader:
             else:
                 indicators['boll_signal'] = '轨道内'
             
-            # 6. 成交量分析
+            # 成交量分析
             vol_ma5 = volume.tail(5).mean()
             indicators['volume_ratio'] = round(volume.iloc[-1] / vol_ma5, 2)
             
@@ -364,9 +344,7 @@ class DataLoader:
             return {}
     
     def get_financial_data(self, symbol: str) -> Dict[str, Any]:
-        """
-        获取财务数据
-        """
+        """获取财务数据"""
         if not self.ts_pro:
             return {}
         
@@ -382,9 +360,6 @@ class DataLoader:
                     'pe': round(float(latest.get('pe', 0)), 2) if latest.get('pe') else 0,
                     'pb': round(float(latest.get('pb', 0)), 2) if latest.get('pb') else 0,
                     'roe': round(float(latest.get('roe', 0)), 2) if latest.get('roe') else 0,
-                    'gross_profit_margin': round(float(latest.get('gross_profit_margin', 0)), 2) if latest.get('gross_profit_margin') else 0,
-                    'net_profit_ratio': round(float(latest.get('net_profit_ratio', 0)), 2) if latest.get('net_profit_ratio') else 0,
-                    'debt_to_assets': round(float(latest.get('debt_to_assets', 0)), 2) if latest.get('debt_to_assets') else 0,
                 }
             
             return {}
@@ -394,11 +369,8 @@ class DataLoader:
             return {}
     
     def get_money_flow(self, symbol: str) -> Dict[str, Any]:
-        """
-        获取资金流向
-        """
+        """获取资金流向"""
         try:
-            # 使用akshare获取资金流向
             df = ak.stock_individual_fund_flow(stock=symbol, market="sh" if symbol.startswith('6') else "sz")
             
             if df is not None and not df.empty:
@@ -406,10 +378,6 @@ class DataLoader:
                 return {
                     'main_net_inflow': float(latest.get('主力净流入-净额', 0)) if '主力净流入-净额' in latest else 0,
                     'main_net_inflow_pct': float(latest.get('主力净流入-净占比', 0)) if '主力净流入-净占比' in latest else 0,
-                    'super_net_inflow': float(latest.get('超大单净流入-净额', 0)) if '超大单净流入-净额' in latest else 0,
-                    'big_net_inflow': float(latest.get('大单净流入-净额', 0)) if '大单净流入-净额' in latest else 0,
-                    'mid_net_inflow': float(latest.get('中单净流入-净额', 0)) if '中单净流入-净额' in latest else 0,
-                    'small_net_inflow': float(latest.get('小单净流入-净额', 0)) if '小单净流入-净额' in latest else 0,
                 }
             
             return {}
@@ -419,13 +387,9 @@ class DataLoader:
             return {}
     
     def select_top_stocks(self, count: int = 8) -> List[Dict[str, Any]]:
-        """
-        精选股票：结合市场扫描和技术指标
-        返回评分最高的N只股票
-        """
+        """精选股票"""
         logger.info(f"🎯 开始精选股票（目标: {count}只）...")
         
-        # 获取市场扫描结果
         stocks = self.scan_market(limit=100)
         
         if not stocks:
@@ -438,13 +402,8 @@ class DataLoader:
             try:
                 code = stock['code']
                 
-                # 获取K线数据
                 kline = self.get_kline_data(code, count=60)
-                
-                # 计算技术指标
                 tech = self.calculate_technical_indicators(kline)
-                
-                # 评分
                 score = self._calculate_score(stock, tech)
                 
                 stock['tech'] = tech
@@ -452,16 +411,13 @@ class DataLoader:
                 
                 scored_stocks.append(stock)
                 
-                time.sleep(0.1)  # 避免请求过快
+                time.sleep(0.1)
                 
             except Exception as e:
                 logger.debug(f"处理 {stock.get('code')} 时出错: {e}")
                 continue
         
-        # 按评分排序
         scored_stocks.sort(key=lambda x: x['score'], reverse=True)
-        
-        # 取前N只
         top_stocks = scored_stocks[:count]
         
         logger.info(f"✅ 精选完成，选出 {len(top_stocks)} 只股票")
@@ -469,26 +425,19 @@ class DataLoader:
         return top_stocks
     
     def _calculate_score(self, stock: Dict, tech: Dict) -> float:
-        """
-        计算股票评分
-        综合考虑：涨幅、技术指标、资金流向
-        """
+        """计算股票评分"""
         score = 0.0
         
-        # 涨幅得分 (-10到20)
         pct = stock.get('pct_change', 0)
         if 2 <= pct <= 5:
-            score += 15  # 理想涨幅区间
+            score += 15
         elif 0 <= pct < 2:
             score += 10
         elif 5 <= pct <= 9:
             score += 12
         elif -2 <= pct < 0:
             score += 5
-        else:
-            score += 0
         
-        # 成交量得分 (0到10)
         vol_ratio = tech.get('volume_ratio', 1)
         if vol_ratio > 2:
             score += 10
@@ -497,30 +446,22 @@ class DataLoader:
         elif vol_ratio > 1:
             score += 5
         
-        # MACD得分 (0到10)
-        macd = tech.get('macd', 0)
-        macd_signal = tech.get('macd_signal', '震荡')
-        if '金叉' in macd_signal and macd > 0:
+        macd_signal = tech.get('macd_status', '震荡')
+        if '金叉' in macd_signal and tech.get('macd', 0) > 0:
             score += 10
         elif '金叉' in macd_signal:
             score += 7
-        elif '震荡' in macd_signal:
-            score += 5
         
-        # KDJ得分 (0到10)
         kdj_signal = tech.get('kdj_signal', '震荡')
         if '金叉' in kdj_signal:
             score += 8
         
-        # RSI得分 (0到10)
-        rsi = tech.get('rsi', 50)
         rsi_signal = tech.get('rsi_signal', '正常')
         if rsi_signal == '正常':
             score += 8
         elif rsi_signal == '超卖':
             score += 10
         
-        # 布林带得分 (0到5)
         boll_signal = tech.get('boll_signal', '')
         if '突破上轨' in boll_signal:
             score += 5
