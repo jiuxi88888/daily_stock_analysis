@@ -1,312 +1,514 @@
+# -*- coding: utf-8 -*-
 """
-分析模块 - 升级版
-增强AI分析能力，提高预测准确度
+===================================
+A股股票分析器 - 升级版 v2.0
+===================================
+增强功能：
+1. 全市场扫描精选股票
+2. 技术指标分析（MACD、KDJ、RSI、布林带）
+3. 资金流向追踪
+4. AI专业分析框架
+5. 精选8只优质股票
 """
+
+import os
+import sys
 import logging
 import time
-from typing import Dict, List, Any, Optional
-import pandas as pd
-import numpy as np
+import random
+from typing import List, Dict, Any, Optional
 from datetime import datetime
-from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
 
+class TechnicalIndicators:
+    """技术指标计算器"""
+    
+    @staticmethod
+    def calculate_ma(prices: List[float], period: int) -> Optional[float]:
+        """计算移动平均线"""
+        if len(prices) < period:
+            return None
+        return sum(prices[-period:]) / period
+    
+    @staticmethod
+    def calculate_macd(prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, Optional[float]]:
+        """计算MACD"""
+        if len(prices) < slow:
+            return {'macd': None, 'signal': None, 'histogram': None}
+        
+        def calc_ema(data, period):
+            ema = [sum(data[:period]) / period]
+            multiplier = 2 / (period + 1)
+            for price in data[period:]:
+                ema.append((price - ema[-1]) * multiplier + ema[-1])
+            return ema
+        
+        ema_fast = calc_ema(prices, fast)
+        ema_slow = calc_ema(prices, slow)
+        
+        dif = ema_fast[-1] - ema_slow[-1]
+        
+        macd_line = [ema_fast[i] - ema_slow[i] for i in range(len(ema_fast))]
+        if len(macd_line) < signal:
+            return {'macd': dif, 'signal': None, 'histogram': None}
+        
+        dea = sum(macd_line[-signal:]) / signal
+        
+        return {
+            'macd': dif,
+            'signal': dea,
+            'histogram': (dif - dea) * 2
+        }
+    
+    @staticmethod
+    def calculate_kdj(highs: List[float], lows: List[float], closes: List[float], 
+                      period: int = 9, k_period: int = 3, d_period: int = 3) -> Dict[str, Optional[float]]:
+        """计算KDJ"""
+        if len(closes) < period:
+            return {'k': None, 'd': None, 'j': None}
+        
+        rsv_list = []
+        for i in range(period - 1, len(closes)):
+            high = max(highs[i - period + 1:i + 1])
+            low = min(lows[i - period + 1:i + 1])
+            close = closes[i]
+            
+            if high == low:
+                rsv = 50
+            else:
+                rsv = (close - low) / (high - low) * 100
+            rsv_list.append(rsv)
+        
+        if len(rsv_list) < k_period:
+            return {'k': None, 'd': None, 'j': None}
+        
+        k = 50.0
+        d = 50.0
+        multiplier_k = 1 / k_period
+        multiplier_d = 1 / d_period
+        
+        for rsv in rsv_list[-k_period:]:
+            k = rsv * multiplier_k + k * (1 - multiplier_k)
+        
+        for k_val in rsv_list[-d_period:]:
+            d = k_val * multiplier_d + d * (1 - multiplier_d)
+        
+        j = 3 * k - 2 * d
+        
+        return {'k': k, 'd': d, 'j': j}
+    
+    @staticmethod
+    def calculate_rsi(prices: List[float], period: int = 14) -> Optional[float]:
+        """计算RSI"""
+        if len(prices) < period + 1:
+            return None
+        
+        gains = []
+        losses = []
+        for i in range(1, len(prices)):
+            change = prices[i] - prices[i - 1]
+            if change > 0:
+                gains.append(change)
+                losses.append(0)
+            else:
+                gains.append(0)
+                losses.append(abs(change))
+        
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
+        
+        if avg_loss == 0:
+            return 100
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi
+    
+    @staticmethod
+    def calculate_bollinger_bands(prices: List[float], period: int = 20, 
+                                   std_dev: int = 2) -> Dict[str, Optional[float]]:
+        """计算布林带"""
+        if len(prices) < period:
+            return {'upper': None, 'middle': None, 'lower': None}
+        
+        import statistics
+        recent_prices = prices[-period:]
+        middle = statistics.mean(recent_prices)
+        std = statistics.stdev(recent_prices)
+        
+        upper = middle + std_dev * std
+        lower = middle - std_dev * std
+        
+        return {
+            'upper': upper,
+            'middle': middle,
+            'lower': lower
+        }
+
+
+class StockSelector:
+    """股票精选器 - 全市场扫描精选优质股票"""
+    
+    def __init__(self, data_loader, config):
+        self.data_loader = data_loader
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+    
+    def select_stocks(self, count: int = 8) -> List[Dict[str, Any]]:
+        """精选股票核心逻辑"""
+        self.logger.info(f"🎯 开始精选股票（目标: {count}只）...")
+        
+        selected = []
+        
+        try:
+            strong_stocks = self._get_strong_stocks()
+            if strong_stocks:
+                selected.extend(strong_stocks[:count])
+                self.logger.info(f"✅ 从强势股票中精选: {len(strong_stocks[:count])}只")
+            
+            if len(selected) < count:
+                industry_leaders = self._get_industry_leaders(count - len(selected))
+                selected.extend(industry_leaders)
+                self.logger.info(f"✅ 补充行业龙头: {len(industry_leaders)}只")
+            
+            if len(selected) < count:
+                backup_stocks = self._get_backup_stocks(count - len(selected))
+                selected.extend(backup_stocks)
+                self.logger.info(f"✅ 补充备选股票: {len(backup_stocks)}只")
+            
+            seen = set()
+            unique_selected = []
+            for stock in selected:
+                code = stock.get('code')
+                if code and code not in seen:
+                    seen.add(code)
+                    unique_selected.append(stock)
+            
+            self.logger.info(f"✅ 精选完成，共 {len(unique_selected)} 只股票")
+            return unique_selected[:count]
+            
+        except Exception as e:
+            self.logger.error(f"❌ 精选股票失败: {e}")
+            return []
+    
+    def _get_strong_stocks(self) -> List[Dict[str, Any]]:
+        """获取今日强势股票"""
+        try:
+            import akshare as ak
+            
+            df = ak.stock_zt_pool_strong_em()
+            
+            stocks = []
+            for _, row in df.head(10).iterrows():
+                try:
+                    code = str(row.get('代码', ''))
+                    name = str(row.get('名称', ''))
+                    if code and not code.startswith('8') and not code.startswith('4'):
+                        stocks.append({
+                            'code': code,
+                            'name': name,
+                            'source': '强势股',
+                            'reason': f"涨停强势股"
+                        })
+                except:
+                    continue
+            
+            return stocks
+        except Exception as e:
+            self.logger.warning(f"⚠️ 获取强势股票失败: {e}")
+            return []
+    
+    def _get_industry_leaders(self, count: int) -> List[Dict[str, Any]]:
+        """获取行业龙头股"""
+        try:
+            import akshare as ak
+            
+            df = ak.stock_board_industry_name_em()
+            
+            top_industries = df.nlargest(5, '涨跌幅')
+            
+            stocks = []
+            for _, industry in top_industries.iterrows():
+                try:
+                    industry_name = industry.get('名称', '')
+                    if industry_name:
+                        industry_df = ak.stock_board_industry_cons_em(symbol=industry_name)
+                        if not industry_df.empty:
+                            for _, stock in industry_df.head(2).iterrows():
+                                code = str(stock.get('代码', ''))
+                                name = str(stock.get('名称', ''))
+                                if code and not code.startswith('8') and not code.startswith('4'):
+                                    stocks.append({
+                                        'code': code,
+                                        'name': name,
+                                        'source': '行业龙头',
+                                        'reason': f"行业龙头：{industry_name}"
+                                    })
+                except:
+                    continue
+            
+            return stocks[:count]
+        except Exception as e:
+            self.logger.warning(f"⚠️ 获取行业龙头失败: {e}")
+            return []
+    
+    def _get_backup_stocks(self, count: int) -> List[Dict[str, Any]]:
+        """获取备选优质股"""
+        backup_list = [
+            {'code': '600519', 'name': '贵州茅台', 'source': '备选', 'reason': '白酒龙头'},
+            {'code': '000858', 'name': '五粮液', 'source': '备选', 'reason': '白酒龙头'},
+            {'code': '300750', 'name': '宁德时代', 'source': '备选', 'reason': '新能源龙头'},
+            {'code': '601318', 'name': '中国平安', 'source': '备选', 'reason': '保险龙头'},
+            {'code': '600036', 'name': '招商银行', 'source': '备选', 'reason': '银行龙头'},
+            {'code': '000001', 'name': '平安银行', 'source': '备选', 'reason': '银行股'},
+            {'code': '002594', 'name': '比亚迪', 'source': '备选', 'reason': '汽车龙头'},
+            {'code': '300059', 'name': '东方财富', 'source': '备选', 'reason': '券商龙头'},
+        ]
+        
+        return backup_list[:count]
+
+
 class AIEngine:
-    """AI 分析引擎 - 升级版"""
+    """AI分析引擎 - 使用硅基流动API"""
     
     def __init__(self, config):
         self.config = config
-        self.client = None
-        self._init_ai()
-    
-    def _init_ai(self):
-        """初始化AI客户端"""
-        if self.config.ai.api_key:
-            try:
-                self.client = OpenAI(
-                    api_key=self.config.ai.api_key,
-                    base_url=self.config.ai.base_url,
-                    timeout=self.config.ai.timeout
-                )
-                logger.info(f"✅ AI客户端初始化成功 (BaseURL: {self.config.ai.base_url})")
-            except Exception as e:
-                logger.error(f"❌ AI客户端初始化失败: {e}")
-        else:
-            logger.warning("⚠️  AI API Key 未配置")
-    
-    def analyze_stock(self, stock_data: Dict[str, Any], market_data: Dict[str, Any] = None) -> Optional[str]:
-        """使用AI分析股票"""
-        if not self.client:
-            return "⚠️ AI分析不可用（未配置API密钥）"
+        self.logger = logging.getLogger(__name__)
         
+        self.api_key = os.getenv('OPENAI_API_KEY', '')
+        self.base_url = os.getenv('OPENAI_BASE_URL', 'https://api.bianxie.ai/v1')
+        self.model = os.getenv('AI_MODEL', 'gpt-4o')
+        
+        self.logger.info(f"🤖 AI引擎初始化: {self.base_url}/{self.model}")
+    
+    def analyze_stock(self, stock_data: Dict[str, Any]) -> Dict[str, Any]:
+        """使用AI分析单只股票"""
         try:
-            prompt = self._build_analysis_prompt(stock_data, market_data)
+            prompt = self._build_analysis_prompt(stock_data)
+            response = self._call_api(prompt)
+            result = self._parse_response(response)
             
-            response = self.client.chat.completions.create(
-                model=self.config.ai.model,
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": self._get_system_prompt()
-                    },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
-                ],
-                max_tokens=self.config.ai.max_tokens,
-                temperature=self.config.ai.temperature
-            )
-            
-            analysis = response.choices[0].message.content
-            logger.info(f"✅ AI分析完成 (模型: {self.config.ai.model})")
-            return analysis
+            return {
+                'ai_advice': result.get('advice', '观望'),
+                'ai_score': result.get('score', 50),
+                'ai_summary': result.get('summary', ''),
+                'ai_risk': result.get('risk', ''),
+                'ai_trend': result.get('trend', '震荡')
+            }
             
         except Exception as e:
-            logger.error(f"❌ AI分析失败: {e}")
-            return None
+            self.logger.error(f"AI分析失败: {e}")
+            return {
+                'ai_advice': '观望',
+                'ai_score': 50,
+                'ai_summary': 'AI分析暂时不可用',
+                'ai_risk': '',
+                'ai_trend': '震荡'
+            }
     
-    def _get_system_prompt(self) -> str:
-        """
-        升级版系统提示词
-        让AI更专业地分析股票
-        """
-        return """你是一位具有10年经验的资深股票分析师，专注于A股市场短线和中线投资。
-
-## 分析原则
-1. **客观严谨**：基于数据说话，不主观臆断
-2. **风险第一**：永远把风险控制放在首位
-3. **顺势而为**：尊重市场趋势，不逆势操作
-
-## 分析框架（请严格按此框架输出）
-
-### 一、市场环境判断
-- 当前大盘走势（上证、深证、创业板）
-- 市场情绪（乐观/中性/悲观）
-- 板块热点分析
-
-### 二、基本面简析
-- 当前价格位置分析
-- 估值水平（PE、PB）
-- 业绩情况（如有）
-
-### 三、技术面分析
-- 均线系统（多头/空头排列）
-- MACD指标（方向、动能）
-- KDJ指标（超买超卖）
-- 布林带（当前位置）
-- 成交量（放量/缩量）
-
-### 四、资金流向
-- 主力资金净流入/流出
-- 资金动向判断
-
-### 五、综合研判
-基于以上分析，给出：
-- **短期走势预测**（1-3天）：看涨/看跌/震荡
-- **预测置信度**：高/中/低（给出理由）
-- **关键支撑位**：元
-- **关键压力位**：元
-
-### 六、操作建议
-| 操作 | 条件 |
-|------|------|
-| 买入 | 同时满足：缩量回调+技术支撑+资金流入 |
-| 持有 | 趋势完好，持有为主 |
-| 卖出 | 放量滞涨/跌破止损 |
-| 观望 | 信号不明确 |
-
-### 七、风险提示
-- 明确说明可能的风险
-- 建议止损位
-- 仓位建议
-
-## 输出要求
-1. 用中文回答
-2. 结构清晰，使用Markdown
-3. 预测要有数据支撑
-4. 置信度评估要诚实
-5. 字数控制在400-600字
-
-## 免责声明
-以上分析仅供参考，不构成投资建议。股市有风险，投资需谨慎。"""
-    
-    def _build_analysis_prompt(self, stock_data: Dict[str, Any], market_data: Dict[str, Any] = None) -> str:
-        """构建分析提示词"""
+    def _build_analysis_prompt(self, stock_data: Dict[str, Any]) -> str:
+        """构建AI分析提示词"""
+        code = stock_data.get('code', '')
+        name = stock_data.get('name', '')
+        price = stock_data.get('current_price', 0)
+        change_pct = stock_data.get('change_percent', 0)
+        volume_ratio = stock_data.get('volume_ratio', 0)
+        turnover = stock_data.get('turnover_rate', 0)
+        ma5 = stock_data.get('ma5', 0)
+        ma10 = stock_data.get('ma10', 0)
+        ma20 = stock_data.get('ma20', 0)
         
-        # 基本行情
-        prompt = f"""请分析以下股票：
+        tech = stock_data.get('technical', {})
+        macd = tech.get('macd', {})
+        kdj = tech.get('kdj', {})
+        rsi = tech.get('rsi', 0)
+        bollinger = tech.get('bollinger', {})
+        
+        prompt = f"""你是一位专业的A股股票分析师，请分析以下股票并给出专业建议。
 
-## 股票基本信息
-- 名称：{stock_data.get('name', '')}
-- 代码：{stock_data.get('code', '')}
-- 当前价格：{stock_data.get('price', 0):.2f} 元
-- 涨跌幅：{stock_data.get('pct_change', 0):+.2f}%
-- 涨跌额：{stock_data.get('change', 0):+.2f} 元
-- 今日开盘：{stock_data.get('open', 0):.2f} 元
-- 今日最高：{stock_data.get('high', 0):.2f} 元
-- 今日最低：{stock_data.get('low', 0):.2f} 元
-- 成交量：{stock_data.get('volume', 0):,} 手
-- 成交额：{stock_data.get('amount', 0):,.2f} 万元
-- 振幅：{stock_data.get('amplitude', 0):.2f}%
+**股票信息**
+- 代码: {code}
+- 名称: {name}
+- 当前价: {price:.2f}元
+- 涨跌幅: {change_pct:+.2f}%
 
+**价格指标**
+- MA5: {ma5:.2f} (5日均线)
+- MA10: {ma10:.2f} (10日均线)
+- MA20: {ma20:.2f} (20日均线)
+
+**量能指标**
+- 量比: {volume_ratio:.2f}
+- 换手率: {turnover:.2f}%
+
+**技术指标**
+- MACD: DIF={macd.get('macd', 0):.2f}, DEA={macd.get('signal', 0):.2f}, 柱={macd.get('histogram', 0):.2f}
+- KDJ: K={kdj.get('k', 0):.2f}, D={kdj.get('d', 0):.2f}, J={kdj.get('j', 0):.2f}
+- RSI(14): {rsi:.2f}
+- 布林带: 上轨={bollinger.get('upper', 0):.2f}, 中轨={bollinger.get('middle', 0):.2f}, 下轨={bollinger.get('lower', 0):.2f}
+
+请给出:
+1. 一句话决策建议（买入/观望/卖出）
+2. 评分(0-100)
+3. 简明理由(50字内)
+4. 风险提示(30字内)
+5. 趋势判断(上涨/下跌/震荡)
+
+以JSON格式返回:
+{{"advice":"买入/观望/卖出","score":75,"summary":"...","risk":"...","trend":"上涨"}}
 """
-        
-        # 大盘指数
-        if market_data:
-            prompt += "## 大盘指数\n"
-            for code, data in market_data.items():
-                pct = data.get('pct_change', 0)
-                emoji = "📈" if pct > 0 else "📉" if pct < 0 else "➡️"
-                prompt += f"- {emoji} {data.get('name', code)}：{data.get('price', 0):.2f} ({pct:+.2f}%)\n"
-            prompt += "\n"
-        
-        # 技术指标
-        tech = stock_data.get('tech', {})
-        if tech:
-            prompt += "## 技术指标\n"
-            prompt += f"- MA5：{tech.get('ma5', 0):.2f} 元\n"
-            prompt += f"- MA10：{tech.get('ma10', 0):.2f} 元\n"
-            prompt += f"- MA20：{tech.get('ma20', 0):.2f} 元\n"
-            prompt += f"- MACD：{tech.get('macd', 0):.3f}，信号：{tech.get('macd_signal', '震荡')}\n"
-            prompt += f"- KDJ：K={tech.get('kdj_k', 0):.2f} D={tech.get('kdj_d', 0):.2f} J={tech.get('kdj_j', 0):.2f}，信号：{tech.get('kdj_signal', '震荡')}\n"
-            prompt += f"- RSI(14)：{tech.get('rsi', 0):.2f}，状态：{tech.get('rsi_signal', '正常')}\n"
-            prompt += f"- 布林带：上轨{tech.get('boll_upper', 0):.2f}，中轨{tech.get('boll_middle', 0):.2f}，下轨{tech.get('boll_lower', 0):.2f}\n"
-            prompt += f"- 成交量：较5日均量{tech.get('volume_ratio', 1):.2f}倍，状态：{tech.get('volume_signal', '正常')}\n"
-            prompt += "\n"
-        
-        # 资金流向
-        money_flow = stock_data.get('money_flow', {})
-        if money_flow:
-            prompt += "## 资金流向\n"
-            main_inflow = money_flow.get('main_net_inflow', 0)
-            main_pct = money_flow.get('main_net_inflow_pct', 0)
-            if main_inflow > 0:
-                prompt += f"- 主力净流入：+{main_inflow/1e8:.2f} 亿（占比{abs(main_pct):.1f}%）✅\n"
-            else:
-                prompt += f"- 主力净流出：{main_inflow/1e8:.2f} 亿（占比{abs(main_pct):.1f}%）⚠️\n"
-            prompt += "\n"
-        
-        prompt += """请按照分析框架进行全面分析，给出专业、客观的研判。"""
-        
         return prompt
+    
+    def _call_api(self, prompt: str) -> str:
+        """调用硅基流动API"""
+        try:
+            import openai
+            
+            client = openai.OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
+            
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "你是一位专业的A股股票分析师。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            self.logger.error(f"API调用失败: {e}")
+            raise
+    
+    def _parse_response(self, response: str) -> Dict[str, Any]:
+        """解析API响应"""
+        try:
+            import json
+            
+            if '{' in response and '}' in response:
+                json_str = response[response.find('{'):response.rfind('}')+1]
+                return json.loads(json_str)
+            
+            return {
+                'advice': '观望',
+                'score': 50,
+                'summary': response[:100],
+                'risk': '',
+                'trend': '震荡'
+            }
+        except:
+            return {
+                'advice': '观望',
+                'score': 50,
+                'summary': response[:100] if response else '',
+                'risk': '',
+                'trend': '震荡'
+            }
 
 
 class StockAnalyzer:
-    """股票分析器 - 升级版"""
+    """股票分析器主类"""
     
     def __init__(self, data_loader, ai_engine, config):
         self.data_loader = data_loader
         self.ai_engine = ai_engine
         self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.tech_indicator = TechnicalIndicators()
+        self.stock_selector = StockSelector(data_loader, config)
     
-    def analyze_single_stock(self, symbol: str) -> Dict[str, Any]:
-        """分析单个股票"""
-        logger.info(f"📈 分析股票: {symbol}")
-        
-        # 获取实时数据
-        data = self.data_loader.get_realtime_data(symbol)
-        if not data:
-            return {"error": "获取数据失败", "code": symbol}
-        
-        # 获取K线数据和技术指标
-        kline = self.data_loader.get_kline_data(symbol, count=60)
-        tech = self.data_loader.calculate_technical_indicators(kline)
-        data['tech'] = tech
-        
-        # 获取资金流向
-        money_flow = self.data_loader.get_money_flow(symbol)
-        data['money_flow'] = money_flow
-        
-        # 获取大盘数据
-        market_data = self.data_loader.get_market_index()
-        
-        # AI分析
-        ai_analysis = None
-        if self.config.runtime.report_type != "simple":
-            ai_analysis = self.ai_engine.analyze_stock(data, market_data)
-        
-        return {
-            "code": symbol,
-            "name": data.get("name", symbol),
-            "data": data,
-            "market": market_data,
-            "tech": tech,
-            "money_flow": money_flow,
-            "ai_analysis": ai_analysis,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-    
-    def analyze_stocks(self, symbols: List[str]) -> List[Dict[str, Any]]:
-        """批量分析股票"""
+    def analyze_stocks(self, stock_codes: List[str]) -> List[Dict[str, Any]]:
+        """分析股票列表"""
         results = []
         
-        for i, symbol in enumerate(symbols):
-            if i > 0 and self.config.runtime.analysis_delay > 0:
-                time.sleep(self.config.runtime.analysis_delay)
-            
+        for code in stock_codes:
             try:
-                result = self.analyze_single_stock(symbol)
-                results.append(result)
+                self.logger.info(f"📊 正在分析: {code}")
+                
+                stock_data = self.data_loader.get_stock_data(code)
+                
+                if not stock_data or 'error' in stock_data:
+                    results.append({
+                        'code': code,
+                        'error': stock_data.get('error', '获取数据失败')
+                    })
+                    continue
+                
+                stock_data['technical'] = self._calculate_technical(stock_data)
+                ai_result = self.ai_engine.analyze_stock(stock_data)
+                stock_data.update(ai_result)
+                stock_data['decision'] = self._make_decision(stock_data)
+                
+                results.append(stock_data)
+                
+                time.sleep(random.uniform(1.0, 2.0))
+                
             except Exception as e:
-                logger.error(f"❌ 分析 {symbol} 失败: {e}")
-                results.append({"error": str(e), "code": symbol})
+                self.logger.error(f"分析 {code} 失败: {e}")
+                results.append({
+                    'code': code,
+                    'error': str(e)
+                })
         
         return results
     
     def select_and_analyze(self, count: int = 8) -> List[Dict[str, Any]]:
-        """
-        精选股票并分析
-        这是升级版的核心功能
-        """
-        logger.info(f"🎯 开始精选+分析 {count} 只股票...")
+        """精选股票并分析"""
+        selected_stocks = self.stock_selector.select_stocks(count)
         
-        # 精选股票
-        top_stocks = self.data_loader.select_top_stocks(count=count)
-        
-        if not top_stocks:
-            logger.error("❌ 精选失败")
+        if not selected_stocks:
+            self.logger.warning("⚠️ 未筛选到任何股票")
             return []
         
-        # 获取大盘数据
-        market_data = self.data_loader.get_market_index()
+        codes = [s['code'] for s in selected_stocks]
+        results = self.analyze_stocks(codes)
         
-        # AI分析每只股票
-        results = []
-        for i, stock in enumerate(top_stocks):
-            logger.info(f"📈 分析精选股票 {i+1}/{len(top_stocks)}: {stock.get('name')}")
-            
-            try:
-                # 获取资金流向
-                money_flow = self.data_loader.get_money_flow(stock['code'])
-                stock['money_flow'] = money_flow
-                
-                # AI分析
-                ai_analysis = None
-                if self.config.runtime.report_type != "simple":
-                    ai_analysis = self.ai_engine.analyze_stock(stock, market_data)
-                
-                result = {
-                    "code": stock['code'],
-                    "name": stock['name'],
-                    "data": stock,
-                    "market": market_data,
-                    "tech": stock.get('tech', {}),
-                    "money_flow": money_flow,
-                    "ai_analysis": ai_analysis,
-                    "score": stock.get('score', 0),
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                
-                results.append(result)
-                
-                time.sleep(1)  # 避免请求过快
-                
-            except Exception as e:
-                logger.error(f"❌ 分析 {stock.get('code')} 失败: {e}")
-                continue
+        for result in results:
+            result['is_selected'] = True
+            for selected in selected_stocks:
+                if selected['code'] == result.get('code'):
+                    result['selection_reason'] = selected.get('reason', '')
+                    break
         
-        logger.info(f"✅ 精选分析完成，共 {len(results)} 只")
         return results
+    
+    def _calculate_technical(self, stock_data: Dict[str, Any]) -> Dict[str, Any]:
+        """计算技术指标"""
+        try:
+            hist = stock_data.get('price_history', [])
+            
+            if len(hist) < 20:
+                return {}
+            
+            closes = [h['close'] for h in hist]
+            highs = [h['high'] for h in hist]
+            lows = [h['low'] for h in hist]
+            
+            return {
+                'macd': self.tech_indicator.calculate_macd(closes),
+                'kdj': self.tech_indicator.calculate_kdj(highs, lows, closes),
+                'rsi': self.tech_indicator.calculate_rsi(closes),
+                'bollinger': self.tech_indicator.calculate_bollinger_bands(closes)
+            }
+        except Exception as e:
+            self.logger.error(f"技术指标计算失败: {e}")
+            return {}
+    
+    def _make_decision(self, stock_data: Dict[str, Any]) -> str:
+        """综合决策"""
+        score = stock_data.get('ai_score', 50)
+        
+        if score >= 70:
+            return '🟢 买入'
+        elif score >= 40:
+            return '🟡 观望'
+        else:
+            return '🔴 卖出'
