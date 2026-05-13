@@ -12,13 +12,11 @@ import sys
 import logging
 from datetime import datetime
 
-# 添加src目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
-from src.config import get_config
-from src.data_loader import DataLoader
-from src.analyzer import StockAnalyzer, AIEngine
-from src.notifier import Notifier
+# 导入src目录的模块
+from config import get_config
+from data_loader import DataLoader
+from analyzer import StockAnalyzer, AIEngine
+from notifier import Notifier
 
 def setup_logging():
     """设置日志"""
@@ -138,8 +136,8 @@ def main():
             logger.info(f"✅ 自选股完成: {len([r for r in self_results if 'error' not in r])}/{len(self_results)}")
         
         # ========== 精选股票 ==========
-        enable_selection = os.getenv('ENABLE_SELECTION', 'true').lower() == 'true'
-        selection_count = int(os.getenv('SELECTION_COUNT', '8'))
+        enable_selection = config.enable_selection
+        selection_count = config.selection_count
         
         if enable_selection:
             logger.info(f"🎯 精选股票（目标: {selection_count}只）")
