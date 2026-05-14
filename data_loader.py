@@ -36,9 +36,10 @@ class DataLoader:
             if not realtime:
                 return {'code': symbol, 'error': '获取实时数据失败'}
             
-            # 优先用tushare获取K线
+            # 尝试获取K线
             kline = self._get_kline_from_tushare(symbol)
-            if kline is None:
+            if kline is None or kline.empty:
+                logger.info(f"🔄 tushare获取失败，尝试akshare: {symbol}")
                 kline = self.get_kline_data(symbol, count=60)
             
             tech = self.calculate_technical_indicators(kline)
@@ -70,21 +71,24 @@ class DataLoader:
     def _get_kline_from_tushare(self, symbol: str, count: int = 60) -> Optional[pd.DataFrame]:
         """从Tushare获取K线数据"""
         if not self.ts_pro:
+            logger.warning(f"⚠️ Tushare未初始化，跳过: {symbol}")
             return None
         try:
             ts_code = f"{symbol}.SZ" if not symbol.startswith('6') else f"{symbol}.SH"
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=count * 2)).strftime('%Y%m%d')
             
+            logger.info(f"📊 尝试tushare获取K线: {symbol} ({ts_code})")
+            
             df = self.ts_pro.daily(
                 ts_code=ts_code,
                 start_date=start_date,
                 end_date=end_date
             )
+            
             if df is not None and not df.empty:
                 df = df.sort_values('trade_date')
                 df = df.tail(count)
-                # 重命名为标准列名
                 df = df.rename(columns={
                     'trade_date': '日期',
                     'open': '开盘',
@@ -93,10 +97,12 @@ class DataLoader:
                     'close': '收盘',
                     'volume': '成交量'
                 })
-                logger.info(f"✅ 从tushare获取K线数据 {symbol}: {len(df)}条")
+                logger.info(f"✅ Tushare K线成功 {symbol}: {len(df)}条")
                 return df
+            else:
+                logger.warning(f"⚠️ Tushare返回空数据: {symbol}")
         except Exception as e:
-            logger.debug(f"Tushare K线获取失败 {symbol}: {e}")
+            logger.warning(f"⚠️ Tushare K线失败 {symbol}: {e}")
         return None
 
     def _kline_to_history(self, kline_df: Optional[pd.DataFrame]) -> List[Dict]:
@@ -122,7 +128,7 @@ class DataLoader:
         
         for source in sources:
             if source == 'tushare':
-                continue  # tushare不支持实时，跳过
+                continue
             try:
                 if source == 'tencent':
                     data = self._get_from_tencent(symbol)
