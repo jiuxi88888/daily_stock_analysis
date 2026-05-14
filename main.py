@@ -6,6 +6,7 @@
  3. AI专业分析框架
 """
 import os
+import sys
 import logging
 from datetime import datetime
 
