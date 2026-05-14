@@ -6,15 +6,10 @@
  3. AI专业分析框架
 """
 import os
-import sys
-
-# 关键修复：添加src目录到Python路径
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
-
 import logging
 from datetime import datetime
 
-# 导入src目录的模块
+# 导入模块
 from config import get_config
 from data_loader import DataLoader
 from analyzer import StockAnalyzer, AIEngine
