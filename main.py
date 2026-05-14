@@ -26,66 +26,59 @@ def setup_logging():
     )
 
 def create_report(results: list, market_data: dict) -> str:
-    """生成分析报告"""
-    report = f"""# 📈 股票分析报告 - {datetime.now().strftime('%Y-%m-%d')}
+    """生成精简版分析报告（适配 PushPlus）"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    report = f"# 📈 A股分析日报 {today}\n\n"
 
-## 🎯 大盘概览
-"""
+    # 1. 大盘概览
     if market_data:
-        sz_data = market_data.get('000001', {})
-        sz_data2 = market_data.get('399001', {})
-        cy_data = market_data.get('399006', {})
-        
-        report += f"""
-- 上证指数: {sz_data.get('pct_change', 'N/A')}
-- 深证成指: {sz_data2.get('pct_change', 'N/A')}
-- 创业板: {cy_data.get('pct_change', 'N/A')}
-"""
+        sz = market_data.get('000001', {})
+        sz2 = market_data.get('399001', {})
+        cy = market_data.get('399006', {})
+        report += "| 指数 | 涨跌幅 |\n"
+        report += "| :--- | :--- |\n"
+        report += f"| 上证指数 | {sz.get('pct_change', 'N/A')}% |\n"
+        report += f"| 深证成指 | {sz2.get('pct_change', 'N/A')}% |\n"
+        report += f"| 创业板指 | {cy.get('pct_change', 'N/A')}% |\n\n"
 
-    selected = [r for r in results if r.get('is_selected', False)]
+    # 2. 自选股（非精选）
     self_stocks = [r for r in results if not r.get('is_selected', False)]
-
-    report += f"""
----
-
-## 📊 分析结果汇总
-**自选股: {len(self_stocks)} 只** | **精选股: {len(selected)} 只**
-"""
-
     if self_stocks:
-        report += "### 📌 自选股\n\n"
-        for r in self_stocks:
+        report += "## 📌 自选股\n\n"
+        report += "| 代码 | 名称 | 评分 | 决策 | 涨幅% |\n"
+        report += "| :--- | :--- | :--- | :--- | :--- |\n"
+        for r in self_stocks[:6]:
             if 'error' in r:
-                report += f"- **{r['code']}**: ❌ {r['error']}\n"
-            else:
-                decision = r.get('decision', '')
-                score = r.get('ai_score', 0)
-                ai_summary = r.get('ai_summary', '')
-                report += f"- **{r.get('name', r['code'])}**({r['code']}): {decision} | 评分 {score}\n"
-                if ai_summary:
-                    report += f"  - {ai_summary}\n"
+                continue
+            report += (
+                f"| {r.get('code')} "
+                f"| {r.get('name', '-')} "
+                f"| {r.get('ai_score', 0)} "
+                f"| {r.get('decision', 'N/A')} "
+                f"| {r.get('change_percent', 0):+.2f}% |\n"
+            )
         report += "\n"
 
+    # 3. 精选股票
+    selected = [r for r in results if r.get('is_selected', False)]
     if selected:
-        report += "### 🎯 精选股票\n\n"
+        report += "## 🎯 精选股票\n\n"
+        report += "| 代码 | 名称 | 评分 | 决策 | 精选理由 |\n"
+        report += "| :--- | :--- | :--- | :--- | :--- |\n"
         for r in selected:
-            if 'error' not in r:
-                decision = r.get('decision', '')
-                score = r.get('ai_score', 0)
-                ai_summary = r.get('ai_summary', '')
-                reason = r.get('selection_reason', '')
-                report += f"- **{r.get('name', r['code'])}**({r['code']}): {decision} | 评分 {score}\n"
-                if ai_summary:
-                    report += f"  - {ai_summary}\n"
-                if reason:
-                    report += f"  - 精选理由: {reason}\n"
+            reason = r.get('selection_reason', '-')
+            report += (
+                f"| {r.get('code')} "
+                f"| {r.get('name', '-')} "
+                f"| {r.get('ai_score', 0)} "
+                f"| {r.get('decision', 'N/A')} "
+                f"| {reason} |\n"
+            )
         report += "\n"
 
-    report += f"""
----
-
-*报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
-"""
+    report += f"---\n"
+    report += f"📊 自选股: {len(self_stocks)} 只 | 精选股: {len(selected)} 只\n"
+    report += f"*生成时间: {datetime.now().strftime('%H:%M')}*"
     return report
 
 def main():
