@@ -31,6 +31,61 @@ class DataLoader:
             except Exception as e:
                 logger.error(f"❌ Tushare 初始化失败: {e}")
 
+    def get_stock_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """获取股票完整数据（供analyzer使用）"""
+        try:
+            # 获取实时数据
+            realtime = self.get_realtime_data(symbol)
+            if not realtime:
+                return {'code': symbol, 'error': '获取实时数据失败'}
+            
+            # 获取K线历史数据
+            kline = self.get_kline_data(symbol, count=60)
+            
+            # 获取技术指标
+            tech = self.calculate_technical_indicators(kline)
+            
+            # 构建返回数据
+            result = {
+                'code': symbol,
+                'name': realtime.get('name', symbol),
+                'current_price': realtime.get('price', 0),
+                'change_percent': realtime.get('pct_change', 0),
+                'change_amount': realtime.get('change', 0),
+                'volume': realtime.get('volume', 0),
+                'amount': realtime.get('amount', 0),
+                'open': realtime.get('open', 0),
+                'high': realtime.get('high', 0),
+                'low': realtime.get('low', 0),
+                'volume_ratio': tech.get('volume_ratio', 1),
+                'turnover_rate': 0,  # 简化处理
+                'ma5': tech.get('ma5', 0),
+                'ma10': tech.get('ma10', 0),
+                'ma20': tech.get('ma20', 0),
+                'price_history': self._kline_to_history(kline),
+                'technical': tech
+            }
+            return result
+        except Exception as e:
+            logger.error(f"获取股票数据失败 {symbol}: {e}")
+            return {'code': symbol, 'error': str(e)}
+
+    def _kline_to_history(self, kline_df: Optional[pd.DataFrame]) -> List[Dict]:
+        """将K线DataFrame转换为历史数据列表"""
+        if kline_df is None or kline_df.empty:
+            return []
+        history = []
+        for _, row in kline_df.iterrows():
+            history.append({
+                'date': str(row.get('日期', '')),
+                'open': float(row.get('开盘', 0)),
+                'high': float(row.get('最高', 0)),
+                'low': float(row.get('最低', 0)),
+                'close': float(row.get('收盘', 0)),
+                'volume': int(row.get('成交量', 0))
+            })
+        return history
+
     def get_realtime_data(self, symbol: str) -> Optional[Dict[str, Any]]:
         """获取股票实时数据"""
         source_str = getattr(self.config, 'realtime_source_priority', 'tencent,akshare_sina,efinance')
@@ -160,7 +215,6 @@ class DataLoader:
                 continue
         return result
 
-    # ========== 新增功能 ==========
     def scan_market(self, limit: int = 100) -> List[Dict[str, Any]]:
         """全市场扫描，筛选优质股票"""
         try:
@@ -302,7 +356,7 @@ class DataLoader:
 
             # 成交量分析
             vol_ma5 = volume.tail(5).mean()
-            indicators['volume_ratio'] = round(volume.iloc[-1] / vol_ma5, 2)
+            indicators['volume_ratio'] = round(volume.iloc[-1] / vol_ma5, 2) if vol_ma5 > 0 else 1
             if volume.iloc[-1] > vol_ma5 * 1.5:
                 indicators['volume_signal'] = '放量'
             elif volume.iloc[-1] < vol_ma5 * 0.5:
