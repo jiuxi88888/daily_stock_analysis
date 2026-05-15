@@ -2,7 +2,7 @@ name: 每日股票分析
 
 on:
   schedule:
-    - cron: '10 11 * * 1-5'  # 每周一到周五 11:10（北京时间）
+    - cron: '10 19 * * 1-5'  # 每周一到周五 19:10（北京时间）
   workflow_dispatch:
     inputs:
       mode:
