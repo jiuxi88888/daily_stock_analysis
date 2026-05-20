@@ -36,6 +36,22 @@ def setup_env(override: bool = False):
     load_dotenv(dotenv_path=env_path, override=override)
 
 
+# ================= 股票代码标准化（✅ 只加这一块） =================
+def normalize_stock_code(code: str) -> str:
+    code = str(code).strip()
+    if code.endswith((".SH", ".SZ")):
+        return code
+    if code.startswith("6"):
+        return f"{code}.SH"
+    elif code.startswith(("0", "3")):
+        return f"{code}.SZ"
+    return code
+
+
+def normalize_stock_list(raw_list: list) -> list:
+    return [normalize_stock_code(c) for c in raw_list]
+
+
 @dataclass
 class Config:
     """ 系统配置类 - 单例模式
@@ -283,16 +299,18 @@ class Config:
                 os.environ['HTTPS_PROXY'] = https_proxy
                 os.environ['https_proxy'] = https_proxy
         
-        # 解析自选股列表（逗号分隔）
+        # === ✅ 自选股（自动补全交易所后缀） ===
         stock_list_str = os.getenv('STOCK_LIST', '')
-        stock_list = [
+        raw_stock_list = [
             code.strip()
             for code in stock_list_str.split(',')
             if code.strip()
         ]
-        # 如果没有配置，使用默认的示例股票
-        if not stock_list:
-            stock_list = ['600519', '000001', '300750']
+        if not raw_stock_list:
+            raw_stock_list = ['600519', '000001', '300750']
+
+        # ✅ 关键修复：自动变成 600519.SH / 000001.SZ
+        stock_list = normalize_stock_list(raw_stock_list)
         
         # 解析搜索引擎 API Keys（支持多个 key，逗号分隔）
         bocha_keys_str = os.getenv('BOCHA_API_KEYS', '')
@@ -486,7 +504,7 @@ class Config:
         if not stock_list:
             stock_list = ['000001']
         
-        self.stock_list = stock_list
+        self.stock_list = normalize_stock_list(stock_list)
     
     def validate(self) -> List[str]:
         """
