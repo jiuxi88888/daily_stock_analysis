@@ -49,58 +49,109 @@ class StockSelector:
         return candidates[:count]
 
 
-# ================= AI 引擎（✅ 完整预测 + 涨幅） =================
+# ================= AI 引擎（✅ 修复配置读取问题） =================
 class AIEngine:
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.api_key = os.getenv("OPENAI_API_KEY", "")
-        self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.bianxie.ai/v1")
-        self.model = os.getenv("AI_MODEL", "gpt-4o")
-
-    def analyze_stock(self, stock_data):
+        
+        # ✅ 核心修复：从 config 实例中读取配置，而不是 os.getenv
+        self.api_key = config.openai_api_key
+        self.base_url = config.openai_base_url
+        self.model = config.openai_model
+        self.temperature = config.openai_temperature
+        
+        # ✅ 如果 OpenAI 没有配置，尝试使用 Gemini
+        if not self.api_key and config.gemini_api_key:
+            self.logger.info("⚠️ OpenAI API Key 未配置，将使用 Gemini")
+            self.api_key = config.gemini_api_key
+            self.model = config.gemini_model
+            self.temperature = config.gemini_temperature
+            # Gemini 官方 API 端点
+            self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+        
+        if not self.api_key:
+            self.logger.error("❌ 未配置任何 AI API Key (OpenAI 或 Gemini)")
+            self.client = None
+            return
+        
         try:
             import openai
-            client = openai.OpenAI(
+            self.client = openai.OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
                 timeout=30
             )
+            self.logger.info(f"✅ AI 引擎初始化成功")
+            self.logger.info(f"   - 模型: {self.model}")
+            self.logger.info(f"   - 接口: {self.base_url[:30]}...")
+        except Exception as e:
+            self.logger.error(f"❌ AI 引擎初始化失败: {e}")
+            self.client = None
+
+    def analyze_stock(self, stock_data):
+        """分析单只股票，返回包含 ai_prediction 的字典"""
+        if not self.client:
+            return {"ai_prediction": "AI引擎未初始化，请检查API Key配置"}
+        
+        try:
             prompt = self._build_prompt(stock_data)
-            resp = client.chat.completions.create(
+            
+            self.logger.debug(f"正在调用AI分析: {stock_data.get('code')}")
+            
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7
+                temperature=self.temperature,
+                max_tokens=800
             )
+            
+            content = response.choices[0].message.content.strip()
+            
             return {
-                "ai_prediction": resp.choices[0].message.content.strip()
+                "ai_prediction": content,
+                "ai_model": self.model
             }
-        except Exception:
+            
+        except Exception as e:
+            self.logger.error(f"AI 分析失败 {stock_data.get('code', '')}: {e}")
             return {
-                "ai_prediction": "分析暂时不可用"
+                "ai_prediction": f"⚠️ AI分析暂时不可用: {str(e)[:80]}",
+                "ai_model": "error"
             }
 
-    def _build_prompt(self, d):
-        return f"""
-你是一位资深A股量化分析师。
-请基于以下数据，生成一份**完整的股票预测分析**，必须包含未来走势和涨幅预判。
+    def _build_prompt(self, stock_data):
+        """构建AI分析提示词"""
+        tech = stock_data.get("technical", {})
+        
+        prompt = f"""你是一位资深A股量化分析师。请基于以下股票数据，生成一份专业、客观的分析报告。
 
-股票：{d.get('name')}({d.get('code')}
-当前价：{d.get('current_price')}
-趋势：{d.get('technical', {}).get('trend')}
-MACD：{d.get('technical', {}).get('macd_status')}
-RSI：{d.get('technical', {}).get('rsi')}
+【股票基本信息】
+- 名称：{stock_data.get('name', 'N/A')}
+- 代码：{stock_data.get('code', 'N/A')}
+- 当前价：{stock_data.get('current_price', 'N/A')}
+- 涨跌幅：{stock_data.get('pct_chg', 'N/A')}%
+- 成交量：{stock_data.get('volume', 'N/A')}
+- 成交额：{stock_data.get('amount', 'N/A')}
 
-请严格按照以下结构输出（Markdown格式，不要JSON，不要废话）：
-1. 当前技术面定调
-2. 未来3-5日走势预判（明确方向）
-3. 预估涨幅区间（例如：预计上行空间约 2%~4%）
-4. 操作建议（低吸 / 持股 / 风控位）
+【技术指标分析】
+- 趋势方向：{tech.get('trend', 'N/A')}
+- MACD状态：{tech.get('macd_status', 'N/A')}
+- RSI指标：{tech.get('rsi', 'N/A')}
+- 支撑位：{tech.get('support', 'N/A')}
+- 压力位：{tech.get('resistance', 'N/A')}
+- 综合评分：{tech.get('score', 'N/A')}/10
 
-只输出分析内容。
+请严格按照以下结构输出分析报告（使用Markdown格式）：
+1. **技术面分析**：解读当前技术指标和形态
+2. **趋势预判**：未来3-5个交易日的可能走势方向
+3. **关键价位**：重要的支撑位、压力位和目标位
+4. **操作建议**：具体的操作策略（买入/持有/卖出/观望）
+5. **风险提示**：需要注意的主要风险因素
+
+请保持客观、理性，不要使用夸张词汇。如果数据不足，请明确指出。
 """
-
-
+        return prompt
 # ================= 主分析器 =================
 class StockAnalyzer:
     def __init__(self, data_loader, ai_engine, config):
