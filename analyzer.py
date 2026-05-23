@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" A股股票分析器 - 自选股分析（含预测） """
+""" A股股票分析器 - 自选股 + 精选 Top N """
 import os
 import logging
 import time
@@ -13,13 +13,12 @@ logger = logging.getLogger(__name__)
 class AIEngine:
     def __init__(self, config):
         self.config = config
-        self.logger = logging.getLogger(__name__)
         self.api_key = config.openai_api_key
         self.base_url = config.openai_base_url
         self.model = config.openai_model
 
         if not self.api_key:
-            self.logger.warning("⚠️ OpenAI API Key 未配置")
+            logger.warning("⚠️ OpenAI API Key 未配置")
 
     def analyze_stock(self, stock_data):
         if not self.api_key:
@@ -44,13 +43,13 @@ class AIEngine:
             return {"ai_prediction": content or "暂无有效分析"}
 
         except Exception as e:
-            self.logger.error(f"AI分析失败 {stock_data.get('code')}: {e}")
-            return {"ai_prediction": f"⚠️ AI分析暂时不可用"}
+            logger.error(f"AI分析失败 {stock_data.get('code')}: {e}")
+            return {"ai_prediction": "⚠️ AI分析暂时不可用"}
 
     def _build_prompt(self, d):
         return f"""
 你是一位资深A股量化分析师。
-请基于以下数据，生成一份**包含未来走势与涨幅预判**的股票分析。
+请基于以下数据，生成一份包含未来走势与涨幅预判的分析。
 
 股票：{d.get('name')}({d.get('code')})
 当前价：{d.get('current_price')}
@@ -59,13 +58,13 @@ class AIEngine:
 MACD：{d.get('technical', {}).get('macd_status', 'N/A')}
 RSI：{d.get('technical', {}).get('rsi', 'N/A')}
 
-请严格按照以下结构输出（Markdown格式，语言简练）：
-1. 当前技术面定调
-2. 未来3-5日走势预判（明确方向）
-3. 预估涨幅区间（例如：预计上行空间约 2%~4%）
-4. 操作建议（低吸 / 持股 / 风控位）
+请严格按以下结构输出（Markdown，简练）：
+1. 技术面定调
+2. 未来3-5日走势预判
+3. 预估涨幅区间
+4. 操作建议
 
-只输出分析内容，不要返回JSON或多余解释。
+只输出分析内容，不要返回JSON。
 """
 
 
@@ -78,7 +77,6 @@ class StockAnalyzer:
         self.logger = logging.getLogger(__name__)
 
     def analyze_stocks(self, stock_codes):
-        """分析指定股票列表"""
         results = []
 
         for code in stock_codes:
@@ -92,14 +90,31 @@ class StockAnalyzer:
             ai = self.ai_engine.analyze_stock(data)
             data.update(ai)
 
-            # 兜底字段
             data.setdefault("ai_prediction", "暂无AI分析")
             data.setdefault("close", data.get("current_price", 0))
             data.setdefault("pct_chg", 0)
 
             results.append(data)
-
-            # 防限流
             time.sleep(random.uniform(1, 2))
 
         return results
+
+    # ================= ✅ 精选 Top N =================
+    def select_top_stocks(self, results: List[Dict]) -> List[Dict]:
+        """根据技术评分筛选 Top N"""
+        if not self.config.enable_selection:
+            return []
+
+        self.logger.info(f"🎯 在自选股基础上精选 Top {self.config.selection_count} 只股票")
+
+        scored = [
+            r for r in results
+            if r.get("technical", {}).get("score", 0) >= 6
+        ]
+
+        scored.sort(
+            key=lambda x: x.get("technical", {}).get("score", 0),
+            reverse=True
+        )
+
+        return scored[:self.config.selection_count]
