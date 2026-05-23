@@ -1,18 +1,20 @@
-""" 数据加载模块 - 最终修复版（兼容 GitHub Actions） """
+# -*- coding: utf-8 -*-
+"""
+数据加载模块 - GitHub Actions 专用稳定版
+（不使用实时行情，只用 Tushare 日线）
+"""
 import logging
-import time
+import os
 from typing import Dict, Any, Optional
 import pandas as pd
-import numpy as np
-import akshare as ak
-import tushare as ts
 from datetime import datetime, timedelta
-import requests
+import tushare as ts
 
 logger = logging.getLogger(__name__)
 
 # ========= 黑名单 =========
 BLACKLIST_KEYWORDS = {"ST", "*ST", "退"}
+
 
 def is_blacklisted(name: str) -> bool:
     if not name:
@@ -21,13 +23,11 @@ def is_blacklisted(name: str) -> bool:
 
 
 class DataLoader:
-    """数据加载器（最终修复版）"""
+    """数据加载器（GitHub Actions 专用）"""
 
     def __init__(self, config):
         self.config = config
         self.ts_pro = None
-        self._spot_cache = None
-        self._spot_cache_time = 0
         self._init_tushare()
 
     # ================= 初始化 =================
@@ -41,44 +41,54 @@ class DataLoader:
             except Exception as e:
                 logger.error(f"❌ Tushare 初始化失败: {e}")
 
-    # ================= 对外入口 =================
+    # ================= 对外入口（✅ 核心修复） =================
     def get_stock_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        GitHub Actions 专用：
+        - ❌ 不调用实时行情
+        - ✅ 只用 Tushare 日线
+        """
         try:
-            realtime = self.get_realtime_data(symbol)
-            if not realtime:
-                return {"code": symbol, "error": "实时数据失败"}
-
-            if is_blacklisted(realtime.get("name", "")):
-                return {"code": symbol, "error": "黑名单股票"}
-
+            # 1️⃣ 获取 K 线
             kline = self._get_kline_from_tushare(symbol)
             if kline is None or kline.empty:
-                kline = self.get_kline_data(symbol)
+                return {"code": symbol, "error": "K线数据失败"}
 
+            # 2️⃣ 黑名单过滤
+            name = self.get_stock_name(symbol)
+            if is_blacklisted(name):
+                return {"code": symbol, "error": "黑名单股票"}
+
+            # 3️⃣ 技术指标
             tech = self.calculate_technical_indicators(kline)
+
+            # 4️⃣ 取最新一根 K 线作为“当前行情”
+            last = kline.iloc[-1]
 
             return {
                 "code": symbol,
-                "name": realtime.get("name", symbol),
-                "current_price": realtime.get("price", 0),
-                "change_percent": realtime.get("pct_change", 0),
-                "volume": realtime.get("volume", 0),
-                "amount": realtime.get("amount", 0),
-                "open": realtime.get("open", 0),
-                "high": realtime.get("high", 0),
-                "low": realtime.get("low", 0),
+                "name": name,
+                "current_price": last["收盘"],
+                "change_percent": last.get("涨跌幅", 0),
+                "volume": last.get("成交量", 0),
+                "amount": 0,
+                "open": last["开盘"],
+                "high": last["最高"],
+                "low": last["最低"],
                 "technical": tech,
             }
+
         except Exception as e:
             logger.error(f"获取股票数据失败 {symbol}: {e}")
             return {"code": symbol, "error": str(e)}
 
-    # ================= K 线 =================
+    # ================= K 线（Tushare 日线） =================
     def _get_kline_from_tushare(self, symbol: str) -> Optional[pd.DataFrame]:
         if not self.ts_pro:
             return None
+
         try:
-            ts_code = f"{symbol}.SH" if symbol.startswith("6") else f"{symbol}.SZ"
+            ts_code = self.normalize_code(symbol)
             end = datetime.now().strftime("%Y%m%d")
             start = (datetime.now() - timedelta(days=120)).strftime("%Y%m%d")
 
@@ -88,6 +98,7 @@ class DataLoader:
                 end_date=end,
                 adj="qfq",
             )
+
             if df is None or df.empty:
                 return None
 
@@ -100,93 +111,16 @@ class DataLoader:
                     "low": "最低",
                     "close": "收盘",
                     "vol": "成交量",
+                    "pct_chg": "涨跌幅",
                 },
                 inplace=True,
             )
-            return self._clean_kline(df)
-        except Exception:
+
+            return df
+
+        except Exception as e:
+            logger.warning(f"Tushare 获取失败 {symbol}: {e}")
             return None
-
-    def get_kline_data(self, symbol: str) -> Optional[pd.DataFrame]:
-        try:
-            df = ak.stock_zh_a_hist(
-                symbol=symbol,
-                period="daily",
-                start_date=(datetime.now() - timedelta(days=120)).strftime("%Y%m%d"),
-                end_date=datetime.now().strftime("%Y%m%d"),
-                adjust="qfq",
-            )
-            if df is None or df.empty:
-                return None
-            return self._clean_kline(df.tail(60))
-        except Exception:
-            return None
-
-    def _clean_kline(self, df: pd.DataFrame) -> pd.DataFrame:
-        cols = ["开盘", "最高", "最低", "收盘", "成交量"]
-        for c in cols:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-        df.dropna(subset=cols, inplace=True)
-        df.reset_index(drop=True, inplace=True)
-        return df
-
-    # ================= 实时行情 =================
-    def get_realtime_data(self, symbol: str):
-        for func in [
-            self._get_from_tencent,
-            self._get_from_akshare_sina,
-        ]:
-            try:
-                data = func(symbol)
-                if data:
-                    return data
-            except Exception:
-                continue
-        return None
-
-    def _get_from_tencent(self, symbol: str):
-        market = "sh" if symbol.startswith("6") else "sz"
-        url = f"http://qt.gtimg.cn/q={market}{symbol}"
-        r = requests.get(url, timeout=5)
-        if r.status_code != 200:
-            return None
-        p = r.text.split("~")
-        if len(p) < 35:
-            return None
-        return {
-            "code": symbol,
-            "name": p[1],
-            "price": float(p[3] or 0),
-            "pct_change": float(p[32] or 0),
-            "volume": int(float(p[6] or 0)),
-            "amount": float(p[37] or 0),
-            "open": float(p[5] or 0),
-            "high": float(p[33] or 0),
-            "low": float(p[34] or 0),
-        }
-
-    def _get_from_akshare_sina(self, symbol: str):
-        now = time.time()
-        if now - self._spot_cache_time > 3 or self._spot_cache is None:
-            self._spot_cache = ak.stock_zh_a_spot_em()
-            self._spot_cache_time = now
-
-        df = self._spot_cache
-        row = df[df["代码"] == symbol]
-        if row.empty:
-            return None
-        row = row.iloc[0]
-        return {
-            "code": symbol,
-            "name": row["名称"],
-            "price": float(row.get("最新价", 0)),
-            "pct_change": float(row.get("涨跌幅", 0)),
-            "volume": int(float(row.get("成交量", 0))),
-            "amount": float(row.get("成交额", 0)),
-            "open": float(row.get("今开", 0)),
-            "high": float(row.get("最高", 0)),
-            "low": float(row.get("最低", 0)),
-        }
 
     # ================= 技术指标 =================
     def calculate_technical_indicators(self, kline_df: pd.DataFrame) -> Dict[str, Any]:
@@ -249,9 +183,27 @@ class DataLoader:
         )
         return tech
 
-    # ================= ✅ 关键修复点 =================
+    # ================= 工具 =================
+    def normalize_code(self, code: str) -> str:
+        code = str(code).strip()
+        if code.endswith((".SH", ".SZ")):
+            return code
+        if code.startswith("6"):
+            return f"{code}.SH"
+        elif code.startswith(("0", "3")):
+            return f"{code}.SZ"
+        return code
+
+    def get_stock_name(self, symbol: str) -> str:
+        try:
+            ts_code = self.normalize_code(symbol)
+            df = self.ts_pro.stock_basic(ts_code=ts_code, fields="name")
+            return df.iloc[0]["name"] if not df.empty else symbol
+        except Exception:
+            return symbol
+
+    # ================= 大盘指数（兼容 main.py） =================
     def get_market_index(self) -> Dict[str, Any]:
-        """获取大盘指数（兼容 main.py）"""
         indices = {
             "000001": "上证指数",
             "399001": "深证成指",
@@ -260,12 +212,18 @@ class DataLoader:
         result = {}
         for code, name in indices.items():
             try:
-                data = self.get_realtime_data(code)
-                if data:
+                ts_code = f"{code}.SH" if code.startswith("0") else f"{code}.SZ"
+                df = self.ts_pro.index_daily(
+                    ts_code=ts_code,
+                    start_date=(datetime.now() - timedelta(days=5)).strftime("%Y%m%d"),
+                    end_date=datetime.now().strftime("%Y%m%d"),
+                )
+                if df is not None and not df.empty:
+                    last = df.iloc[-1]
                     result[code] = {
                         "name": name,
-                        "price": data.get("price", 0),
-                        "pct_change": data.get("pct_change", 0),
+                        "price": last["close"],
+                        "pct_change": last.get("pct_chg", 0),
                     }
             except Exception:
                 continue
