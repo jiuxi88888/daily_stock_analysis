@@ -2,7 +2,7 @@ name: 每日股票分析
 
 on:
   schedule:
-    - cron: '10 04 * * 1-5'  # 每周一到周五 04:10（北京时间）
+    - cron: '10 04 * * 1-5'  # 每周一到周五（GitHub 按 UTC 执行，即北京时间 12:10；实测常有数小时延迟）
   workflow_dispatch:
     inputs:
       mode:
@@ -19,7 +19,10 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
+    # 新增：允许把报告提交回仓库（否则默认权限可能只读）
+    permissions:
+      contents: write
+
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -32,7 +35,7 @@ jobs:
       LOG_LEVEL: 'INFO'
       ENABLE_SELECTION: 'true'
       SELECTION_COUNT: '8'
-    
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -77,6 +80,34 @@ jobs:
             reports/
             logs/
           retention-days: 7
+
+      # ===== 新增：把报告归档回仓库，使其可通过公开 raw 链接直接抓取 =====
+      # 说明：.gitignore 忽略了 reports/，因此必须用 git add -f 强制提交。
+      # 归档内容：reports/report_YYYYMMDD.md（历史）+ reports/latest.md（最新一期，固定路径）
+      - name: 归档报告到仓库
+        if: always()
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p reports
+          if ls reports/report_*.md >/dev/null 2>&1; then
+            # 取日期最新的那份作为 latest.md
+            latest=$(ls -1 reports/report_*.md | sort | tail -n 1)
+            cp "$latest" reports/latest.md
+            # 只保留最近 60 天的历史报告，避免仓库膨胀
+            ls -1t reports/report_*.md | tail -n +61 | xargs -r rm -f
+            git add -f reports/
+            if git diff --cached --quiet; then
+              echo "报告无变化，跳过提交"
+            else
+              git commit -m "chore: 归档每日股票分析报告 $(date -u +%Y-%m-%d)"
+              git push
+              echo "报告已归档"
+            fi
+          else
+            echo "未找到报告文件，跳过归档"
+          fi
 
       - name: 显示结果
         if: always()
